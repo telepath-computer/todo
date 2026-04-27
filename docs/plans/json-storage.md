@@ -120,11 +120,8 @@ A project surfaces in `todo ls` if `project.active && project.completed === null
 ### Reads
 
 ```
-todo ls                                # everything actionable: tasks + projects, mixed dashboard
-todo ls --tasks                        # tasks only
-todo ls --projects                     # projects only (with sections: Active / Inactive)
+todo ls                                # everything actionable: tasks + projects
 todo ls --context <name>               # filter tasks by context
-todo ls --project <slug>               # tasks in one project
 todo show <ref>                        # polymorphic — show a task or a project
                                        #   <slug>      → project drill-down (all its tasks regardless of state)
                                        #   <slug>#<id> → task detail
@@ -203,7 +200,7 @@ Projects:
 
 Tasks with multiple contexts appear once, under their first alphabetical context (same dedup logic as the existing `renderAvailableGrouped`). Items with no contexts render first, ungrouped. The full context set is shown on the task line in `todo show <ref>`.
 
-`todo ls --projects` adds an Inactive section under Active.
+The Projects section in `todo ls` shows only active, non-terminal projects. Inactive or closed projects don't surface there — visit them via `todo show <slug>`.
 
 `todo show <slug>` (project drill-down) shows the project header + all its tasks regardless of state, broken into Available / Someday / Completed / Dropped subsections.
 
