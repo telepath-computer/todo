@@ -1,43 +1,26 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
+import { addCmd } from './commands/add.js'
+import { configCmd, setDataDirCmd } from './commands/config.js'
+import { editCmd } from './commands/edit.js'
+import {
+  activateCmd,
+  completeCmd,
+  deferCmd,
+  dropCmd,
+} from './commands/lifecycle.js'
+import { listCmd, listProjectsCmd } from './commands/list.js'
+import { addProjectCmd, editProjectCmd } from './commands/projects.js'
+import { showCmd } from './commands/show.js'
 import { DoError } from './core/errors.js'
-import { renderError } from './views/atoms.js'
-import {
-  addProjectCmd,
-  editProjectCmd,
-  listProjectsCmd,
-  removeProjectCmd,
-  showProjectCmd,
-} from './commands/projects.js'
-import {
-  addTaskCmd,
-  completeTaskCmd,
-  editTaskCmd,
-  listTasksCmd,
-  removeTaskCmd,
-  showTaskCmd,
-  uncompleteTaskCmd,
-} from './commands/tasks.js'
-import { setVaultCmd } from './commands/config.js'
-import { listCmd } from './commands/list.js'
-
-function getVaultFlag(cmd: Command): string | undefined {
-  return cmd.optsWithGlobals().vault
-}
 
 function run(fn: () => string): void {
   try {
     const out = fn()
-    if (out) {
-      if (process.stdout.isTTY) console.log()
-      console.log(out)
-      if (process.stdout.isTTY) console.log()
-    }
+    if (out) process.stdout.write(out + '\n')
   } catch (err) {
     if (err instanceof DoError) {
-      if (process.stderr.isTTY) console.error()
-      console.error(renderError(err.message))
-      if (process.stderr.isTTY) console.error()
+      process.stderr.write(`todo: ${err.message}\n`)
       process.exit(1)
     }
     throw err
@@ -46,230 +29,143 @@ function run(fn: () => string): void {
 
 const program = new Command('todo')
 program
-  .description('CLI for GTD-style projects and actions over structured markdown files')
-  .option('--vault <path>', 'override configured vault directory')
+  .description('GTD-style task and project CLI with JSON storage. Agent-first.')
+  .helpOption('-h, --help', 'show help')
+
+program
+  .command('list')
+  .alias('ls')
+  .description('List active actions, waiting items, and active projects')
+  .option('--all', 'also include deferred actions and deferred projects')
+  .action((opts: { all?: boolean }) => {
+    run(() => listCmd({ all: opts.all }))
+  })
+
+program
+  .command('show <id>')
+  .description('Show a single entity (project, action, or waiting) by id')
+  .action((id: string) => {
+    run(() => showCmd(id))
+  })
+
+program
+  .command('add <title>')
+  .description('Add an action or waiting item')
+  .option('--active', 'create an active action (next action)')
+  .option('--deferred', 'create a deferred action (someday/maybe)')
+  .option('--waiting', 'create a waiting item')
+  .option('--project <id>', 'parent project id')
+  .option('--due <date>', 'due date (YYYY-MM-DD or natural language); action only')
+  .option('--note <text>', 'attach a note')
+  .action(
+    (
+      title: string,
+      opts: {
+        active?: boolean
+        deferred?: boolean
+        waiting?: boolean
+        project?: string
+        due?: string
+        note?: string
+      },
+    ) => {
+      run(() =>
+        addCmd({
+          title,
+          active: opts.active,
+          deferred: opts.deferred,
+          waiting: opts.waiting,
+          project: opts.project,
+          due: opts.due,
+          note: opts.note,
+        }),
+      )
+    },
+  )
+
+program
+  .command('edit <id>')
+  .description('Edit an item (title, note, due, project)')
+  .option('--title <text>', 'new title')
+  .option('--note <text>', "note text; '' clears")
+  .option('--due <date>', "due date; '' clears (action only)")
+  .option('--project <id>', "parent project id; '' detaches")
+  .action(
+    (
+      id: string,
+      opts: { title?: string; note?: string; due?: string; project?: string },
+    ) => {
+      run(() => editCmd(id, opts))
+    },
+  )
 
 const projects = program.command('projects').description('Manage projects')
 
 projects
   .command('list')
-  .description('List all projects')
-  .action((_opts, cmd: Command) => {
-    run(() => listProjectsCmd(getVaultFlag(cmd)))
+  .description('List active and deferred projects')
+  .action(() => {
+    run(() => listProjectsCmd())
   })
 
 projects
-  .command('add <slug>')
-  .description('Create a new project')
-  .option('--title <text>', 'frontmatter title (defaults to slug)')
-  .option('--notes <text>', 'project-level notes (multi-line allowed)')
-  .action(
-    (slug: string, opts: { title?: string; notes?: string }, cmd: Command) => {
-      run(() => addProjectCmd(getVaultFlag(cmd), slug, opts.title, opts.notes))
-    },
-  )
-
-projects
-  .command('show <slug>')
-  .description('Show project details, notes, and tasks')
-  .action((slug: string, _opts, cmd: Command) => {
-    run(() => showProjectCmd(getVaultFlag(cmd), slug))
-  })
-
-projects
-  .command('edit <slug>')
-  .description('Edit a project (title and/or notes)')
-  .option('--title <text>', 'new frontmatter title')
-  .option('--notes <text>', "project-level notes; pass '' to clear")
-  .action(
-    (slug: string, opts: { title?: string; notes?: string }, cmd: Command) => {
-      run(() =>
-        editProjectCmd(getVaultFlag(cmd), slug, {
-          title: opts.title,
-          notes: opts.notes,
-        }),
-      )
-    },
-  )
-
-projects
-  .command('remove <slug>')
-  .description('Delete a project')
-  .action((slug: string, _opts, cmd: Command) => {
-    run(() => removeProjectCmd(getVaultFlag(cmd), slug))
-  })
-
-const tasks = program.command('tasks').description('Manage tasks')
-
-tasks
-  .command('list')
-  .description('List tasks across all projects, or within one')
-  .option('--project <slug>', 'filter by project')
-  .option('--available', 'show only Available items')
-  .option('--waiting', 'show only Waiting items')
-  .option('--deferred', 'show only Deferred items')
-  .option('--all', 'show all three lanes (Available + Waiting + Deferred)')
-  .action(
-    (
-      opts: {
-        project?: string
-        available?: boolean
-        waiting?: boolean
-        deferred?: boolean
-        all?: boolean
-      },
-      cmd: Command,
-    ) => {
-      run(() =>
-        listTasksCmd(getVaultFlag(cmd), opts.project, {
-          available: opts.available,
-          waiting: opts.waiting,
-          deferred: opts.deferred,
-          all: opts.all,
-        }),
-      )
-    },
-  )
-
-tasks
   .command('add')
-  .description('Append a task to a project')
-  .requiredOption('--title <text>', 'task text')
-  .requiredOption('--project <slug>', 'project slug to add to')
-  .option('--due <date>', 'due date (YYYY-MM-DD or natural language)')
-  .option('--notes <text>', 'attach task-level notes (multi-line allowed)')
-  .option('--available', 'add to Available lane (default)')
-  .option('--waiting', 'add to Waiting lane')
-  .option('--deferred', 'add to Deferred lane')
-  .option(
-    '--context <name>',
-    'attach a context tag (repeatable, e.g. --context errand --context home)',
-    (value: string, prev: string[] = []) => prev.concat([value]),
-  )
-  .action(
-    (
-      opts: {
-        title: string
-        project: string
-        due?: string
-        notes?: string
-        available?: boolean
-        waiting?: boolean
-        deferred?: boolean
-        context?: string[]
-      },
-      cmd: Command,
-    ) => {
-      run(() =>
-        addTaskCmd(
-          getVaultFlag(cmd),
-          opts.title,
-          opts.project,
-          opts.due,
-          opts.notes,
-          {
-            available: opts.available,
-            waiting: opts.waiting,
-            deferred: opts.deferred,
-          },
-          opts.context ?? [],
-        ),
-      )
-    },
-  )
-
-tasks
-  .command('show <ref>')
-  .description('Show a task with its notes (if any)')
-  .action((ref: string, _opts, cmd: Command) => {
-    run(() => showTaskCmd(getVaultFlag(cmd), ref))
+  .description('Create a new project')
+  .requiredOption('--title <text>', 'project title')
+  .option('--note <text>', 'attach a note')
+  .action((opts: { title: string; note?: string }) => {
+    run(() => addProjectCmd(opts))
   })
 
-tasks
-  .command('complete <ref>')
-  .description('Mark a task complete')
-  .action((ref: string, _opts, cmd: Command) => {
-    run(() => completeTaskCmd(getVaultFlag(cmd), ref))
-  })
-
-tasks
-  .command('uncomplete <ref>')
-  .description('Mark a task not complete')
-  .action((ref: string, _opts, cmd: Command) => {
-    run(() => uncompleteTaskCmd(getVaultFlag(cmd), ref))
-  })
-
-tasks
-  .command('edit <ref>')
-  .description('Edit a task (title, due, notes, lane, contexts, or move to another project)')
-  .option('--title <text>', 'new task text')
-  .option('--due <date>', "due date (YYYY-MM-DD or natural language); pass '' to clear")
-  .option('--project <slug>', 'move to another project')
-  .option('--notes <text>', "task-level notes (multi-line allowed); pass '' to clear")
-  .option('--available', 'move to Available lane')
-  .option('--waiting', 'move to Waiting lane')
-  .option('--deferred', 'move to Deferred lane')
-  .option(
-    '--context <name>',
-    "replace contexts (repeatable; pass '' once to clear)",
-    (value: string, prev: string[] = []) => prev.concat([value]),
-  )
-  .action(
-    (
-      ref: string,
-      opts: {
-        title?: string
-        due?: string
-        project?: string
-        notes?: string
-        available?: boolean
-        waiting?: boolean
-        deferred?: boolean
-        context?: string[]
-      },
-      cmd: Command,
-    ) => {
-      run(() =>
-        editTaskCmd(
-          getVaultFlag(cmd),
-          ref,
-          {
-            title: opts.title,
-            due: opts.due,
-            project: opts.project,
-            notes: opts.notes,
-          },
-          {
-            available: opts.available,
-            waiting: opts.waiting,
-            deferred: opts.deferred,
-          },
-          opts.context,
-        ),
-      )
-    },
-  )
-
-tasks
-  .command('remove <ref>')
-  .description('Delete a task')
-  .action((ref: string, _opts, cmd: Command) => {
-    run(() => removeTaskCmd(getVaultFlag(cmd), ref))
+projects
+  .command('edit <id>')
+  .description('Edit a project (title, note)')
+  .option('--title <text>', 'new title')
+  .option('--note <text>', "note text; '' clears")
+  .action((id: string, opts: { title?: string; note?: string }) => {
+    run(() => editProjectCmd(id, opts))
   })
 
 program
-  .command('list')
-  .description('Cross-project dashboard: Tasks, Waiting, Projects (and Deferred with --all)')
-  .option('--all', 'include the Deferred section')
-  .action((opts: { all?: boolean }, cmd: Command) => {
-    run(() => listCmd(getVaultFlag(cmd), { all: opts.all }))
+  .command('activate <id>')
+  .description('Set active=true on an action or project; clears terminal state')
+  .action((id: string) => {
+    run(() => activateCmd(id))
   })
 
 program
-  .command('set-vault <path>')
-  .description('Set the default vault (writes ~/.todo/config.json)')
+  .command('defer <id>')
+  .description('Set active=false on an action or project; clears terminal state')
+  .action((id: string) => {
+    run(() => deferCmd(id))
+  })
+
+program
+  .command('complete <id>')
+  .description('Mark an entity completed')
+  .action((id: string) => {
+    run(() => completeCmd(id))
+  })
+
+program
+  .command('drop <id>')
+  .description('Mark an entity dropped')
+  .action((id: string) => {
+    run(() => dropCmd(id))
+  })
+
+program
+  .command('set-data-dir <path>')
+  .description('Set the data directory (writes ~/.todo/config.json)')
   .action((path: string) => {
-    run(() => setVaultCmd(path))
+    run(() => setDataDirCmd(path))
+  })
+
+program
+  .command('config')
+  .description('Show resolved CLI configuration')
+  .action(() => {
+    run(() => configCmd())
   })
 
 program.parse()

@@ -1,61 +1,45 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
-import { VaultNotFound } from './errors.js'
+import { dirname, join } from 'node:path'
+import { stableStringify } from './store.js'
 
-export type AppConfig = {
-  vault?: string
+export type Config = {
+  dataDir: string | null
 }
 
-export function todoHome(): string {
-  return join(homedir(), '.todo')
+export type ResolvedConfig = {
+  dataDir: string
+  source: 'env' | 'config' | 'default'
 }
+
+export const ENV_VAR = 'TODO_DATA_DIR'
 
 export function configPath(): string {
-  return join(todoHome(), 'config.json')
+  return join(homedir(), '.todo', 'config.json')
 }
 
-export function defaultVaultPath(): string {
-  return join(todoHome(), 'default')
+export function defaultDataDir(): string {
+  return join(homedir(), '.todo', 'data')
 }
 
-export function readConfig(): AppConfig {
+export function readConfig(): Config {
   const path = configPath()
-  if (!existsSync(path)) return {}
-  try {
-    const raw = JSON.parse(readFileSync(path, 'utf8'))
-    const config: AppConfig = {}
-    if (typeof raw.vault === 'string') config.vault = raw.vault
-    return config
-  } catch {
-    return {}
-  }
+  if (!existsSync(path)) return { dataDir: null }
+  const raw = readFileSync(path, 'utf8')
+  const parsed = JSON.parse(raw) as Partial<Config>
+  return { dataDir: typeof parsed.dataDir === 'string' ? parsed.dataDir : null }
 }
 
-export function writeConfig(config: AppConfig): void {
-  mkdirSync(todoHome(), { recursive: true })
-  writeFileSync(configPath(), JSON.stringify(config, null, 2) + '\n')
+export function writeConfig(c: Config): void {
+  const path = configPath()
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, stableStringify(c) + '\n')
 }
 
-/**
- * Resolve the vault directory.
- *
- * Precedence:
- *   1. `vaultFlag` (from `--vault <path>`). Must exist.
- *   2. `vault` key in `~/.todo/config.json`. Must exist.
- *   3. Default: `~/.todo/default/`. Auto-created if missing.
- */
-export function resolveVault(vaultFlag: string | undefined): string {
-  if (vaultFlag) {
-    if (!existsSync(vaultFlag)) throw new VaultNotFound(vaultFlag)
-    return vaultFlag
-  }
-  const config = readConfig()
-  if (config.vault) {
-    if (!existsSync(config.vault)) throw new VaultNotFound(config.vault)
-    return config.vault
-  }
-  const def = defaultVaultPath()
-  mkdirSync(def, { recursive: true })
-  return def
+export function resolveDataDir(): ResolvedConfig {
+  const fromEnv = process.env[ENV_VAR]
+  if (fromEnv && fromEnv.length > 0) return { dataDir: fromEnv, source: 'env' }
+  const cfg = readConfig()
+  if (cfg.dataDir) return { dataDir: cfg.dataDir, source: 'config' }
+  return { dataDir: defaultDataDir(), source: 'default' }
 }

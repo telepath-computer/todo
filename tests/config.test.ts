@@ -1,118 +1,108 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, it } from 'node:test'
-import { configPath, defaultVaultPath, readConfig, resolveVault, todoHome, writeConfig } from '../src/core/config.js'
-import { VaultNotFound } from '../src/core/errors.js'
-import { cleanup, makeTempDir, makeTempVault } from './helpers.js'
+import { describe, it } from 'node:test'
+import {
+  ENV_VAR,
+  configPath,
+  defaultDataDir,
+  readConfig,
+  resolveDataDir,
+  writeConfig,
+} from '../src/core/config.js'
+import { cleanup, makeTempDir } from './helpers.js'
 
-describe('config.resolveVault', () => {
-  let sandboxHome: string
-  const origHome = process.env.HOME
+function withSandboxedHome<T>(fn: (home: string) => T): T {
+  const home = makeTempDir('todo-home-')
+  const prev = process.env.HOME
+  process.env.HOME = home
+  try {
+    return fn(home)
+  } finally {
+    if (prev === undefined) delete process.env.HOME
+    else process.env.HOME = prev
+    cleanup(home)
+  }
+}
 
-  beforeEach(() => {
-    sandboxHome = makeTempDir('td-home-')
-    process.env.HOME = sandboxHome
+function withoutEnvDataDir<T>(fn: () => T): T {
+  const prev = process.env[ENV_VAR]
+  delete process.env[ENV_VAR]
+  try {
+    return fn()
+  } finally {
+    if (prev === undefined) delete process.env[ENV_VAR]
+    else process.env[ENV_VAR] = prev
+  }
+}
+
+describe('readConfig / writeConfig', () => {
+  it('returns { dataDir: null } when config file is missing', () => {
+    withSandboxedHome(() => {
+      assert.deepEqual(readConfig(), { dataDir: null })
+    })
   })
 
-  afterEach(() => {
-    if (origHome === undefined) delete process.env.HOME
-    else process.env.HOME = origHome
-    cleanup(sandboxHome)
+  it('round-trips dataDir', () => {
+    withSandboxedHome(() => {
+      writeConfig({ dataDir: '/tmp/some/where' })
+      assert.deepEqual(readConfig(), { dataDir: '/tmp/some/where' })
+    })
   })
 
-  it('uses the flag when given and it exists', () => {
-    const vault = makeTempVault()
-    try {
-      assert.equal(resolveVault(vault), vault)
-    } finally {
-      cleanup(vault)
-    }
-  })
-
-  it('throws VaultNotFound when flag points at nonexistent path', () => {
-    assert.throws(() => resolveVault(join(sandboxHome, 'nope')), VaultNotFound)
-  })
-
-  it("uses 'vault' from ~/.todo/config.json when no flag", () => {
-    const vault = makeTempVault()
-    try {
-      mkdirSync(todoHome(), { recursive: true })
-      writeFileSync(configPath(), JSON.stringify({ vault }))
-      assert.equal(resolveVault(undefined), vault)
-    } finally {
-      cleanup(vault)
-    }
-  })
-
-  it('throws VaultNotFound when configured vault is missing', () => {
-    mkdirSync(todoHome(), { recursive: true })
-    writeFileSync(configPath(), JSON.stringify({ vault: join(sandboxHome, 'nope') }))
-    assert.throws(() => resolveVault(undefined), VaultNotFound)
-  })
-
-  it('flag overrides config', () => {
-    const flagVault = makeTempVault()
-    const configVault = makeTempVault()
-    try {
-      mkdirSync(todoHome(), { recursive: true })
-      writeFileSync(configPath(), JSON.stringify({ vault: configVault }))
-      assert.equal(resolveVault(flagVault), flagVault)
-    } finally {
-      cleanup(flagVault)
-      cleanup(configVault)
-    }
-  })
-
-  it('falls back to ~/.todo/default/ when neither flag nor config set', () => {
-    const resolved = resolveVault(undefined)
-    assert.equal(resolved, defaultVaultPath())
-    assert.equal(existsSync(resolved), true, 'default vault is auto-created')
-  })
-
-  it('treats malformed config.json as empty and falls back to default', () => {
-    mkdirSync(todoHome(), { recursive: true })
-    writeFileSync(configPath(), '{ not valid json')
-    const resolved = resolveVault(undefined)
-    assert.equal(resolved, defaultVaultPath())
+  it('writes JSON with sorted keys + trailing newline', () => {
+    withSandboxedHome((home) => {
+      writeConfig({ dataDir: '/x' })
+      const path = join(home, '.todo', 'config.json')
+      assert.ok(existsSync(path))
+      const raw = readFileSync(path, 'utf8')
+      assert.ok(raw.endsWith('\n'))
+      assert.equal(raw.trim(), '{\n  "dataDir": "/x"\n}')
+    })
   })
 })
 
-describe('config.readConfig / writeConfig', () => {
-  let sandboxHome: string
-  const origHome = process.env.HOME
-
-  beforeEach(() => {
-    sandboxHome = makeTempDir('td-home-')
-    process.env.HOME = sandboxHome
+describe('resolveDataDir', () => {
+  it('falls back to default when nothing set', () => {
+    withSandboxedHome(() => {
+      withoutEnvDataDir(() => {
+        const r = resolveDataDir()
+        assert.equal(r.source, 'default')
+        assert.equal(r.dataDir, defaultDataDir())
+      })
+    })
   })
 
-  afterEach(() => {
-    if (origHome === undefined) delete process.env.HOME
-    else process.env.HOME = origHome
-    cleanup(sandboxHome)
+  it('reads from config when present', () => {
+    withSandboxedHome(() => {
+      withoutEnvDataDir(() => {
+        writeConfig({ dataDir: '/tmp/from-config' })
+        const r = resolveDataDir()
+        assert.equal(r.source, 'config')
+        assert.equal(r.dataDir, '/tmp/from-config')
+      })
+    })
   })
 
-  it('readConfig returns {} when file is missing', () => {
-    assert.deepEqual(readConfig(), {})
+  it('env var beats config', () => {
+    withSandboxedHome(() => {
+      writeConfig({ dataDir: '/tmp/from-config' })
+      const prev = process.env[ENV_VAR]
+      process.env[ENV_VAR] = '/tmp/from-env'
+      try {
+        const r = resolveDataDir()
+        assert.equal(r.source, 'env')
+        assert.equal(r.dataDir, '/tmp/from-env')
+      } finally {
+        if (prev === undefined) delete process.env[ENV_VAR]
+        else process.env[ENV_VAR] = prev
+      }
+    })
   })
 
-  it('writeConfig creates ~/.todo/ and persists the config', () => {
-    const vault = makeTempVault()
-    try {
-      writeConfig({ vault })
-      assert.equal(existsSync(todoHome()), true)
-      const raw = JSON.parse(readFileSync(configPath(), 'utf8'))
-      assert.equal(raw.vault, vault)
-      assert.deepEqual(readConfig(), { vault })
-    } finally {
-      cleanup(vault)
-    }
-  })
-
-  it('readConfig ignores unknown keys', () => {
-    mkdirSync(todoHome(), { recursive: true })
-    writeFileSync(configPath(), JSON.stringify({ vault: '/tmp', unknown: 'x' }))
-    assert.deepEqual(readConfig(), { vault: '/tmp' })
+  it('configPath is under HOME/.todo/config.json', () => {
+    withSandboxedHome((home) => {
+      assert.equal(configPath(), join(home, '.todo', 'config.json'))
+    })
   })
 })

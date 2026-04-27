@@ -1,13 +1,11 @@
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { readConfig, writeConfig } from '../core/config.js'
-import { VaultNotFound } from '../core/errors.js'
+import { resolveDataDir, writeConfig } from '../core/config.js'
+import { json } from './shared.js'
 
-export function setVaultCmd(path: string): string {
-  const absolute = resolve(path)
-  if (!existsSync(absolute)) throw new VaultNotFound(absolute)
-  const config = readConfig()
-  config.vault = absolute
-  writeConfig(config)
-  return `vault: ${absolute}`
+export function setDataDirCmd(path: string): string {
+  writeConfig({ dataDir: path })
+  return json(resolveDataDir())
+}
+
+export function configCmd(): string {
+  return json(resolveDataDir())
 }

@@ -1,7 +1,7 @@
 {
   "name": "@telepath-computer/todo",
   "version": "0.2.0",
-  "description": "GTD-style task and project CLI over structured markdown files. Designed for LLM agents to mutate without grepping freeform notes.",
+  "description": "GTD-style task and project CLI with JSON storage. Agent-first: discriminated entity types, stable nanoid refs, JSON-only output.",
   "type": "module",
   "bin": {
     "todo": "./dist/cli.js"
@@ -17,8 +17,7 @@
     "gtd",
     "todo",
     "tasks",
-    "markdown",
-    "obsidian",
+    "json",
     "agents"
   ],
   "license": "MIT",
@@ -36,7 +35,7 @@
   "dependencies": {
     "chrono-node": "^2.9.0",
     "commander": "^12.1.0",
-    "picocolors": "^1.1.1"
+    "nanoid": "^5.1.9"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",

@@ -1,71 +1,32 @@
-import { resolveVault } from '../core/config.js'
-import {
-  createProject,
-  editProject,
-  listProjectSlugs,
-  readProject,
-  removeProject,
-} from '../core/project.js'
-import { loadVault } from '../core/vault.js'
-import { renderHint } from '../views/atoms.js'
-import {
-  renderProjectHeading,
-  renderProjectList,
-  renderProjectShow,
-} from '../views/project.js'
+import { resolveDataDir } from '../core/config.js'
+import { addProject, editList } from '../core/model.js'
+import { newId, nowIso, readStore, writeStore } from '../core/store.js'
+import { json } from './shared.js'
 
-export function listProjectsCmd(vaultFlag: string | undefined): string {
-  const vault = loadVault(resolveVault(vaultFlag))
-  const slugs = listProjectSlugs(vault)
-  if (slugs.length === 0) {
-    return process.stdout.isTTY
-      ? renderHint('No projects. Create one with: todo projects add <slug>')
-      : ''
-  }
-  const projects = slugs.map((slug) => {
-    const p = readProject(vault, slug)
-    return { slug: p.slug, title: p.title }
+export type AddProjectOpts = { title: string; note?: string }
+
+export function addProjectCmd(opts: AddProjectOpts): string {
+  const { dataDir } = resolveDataDir()
+  const store = readStore(dataDir)
+  const { store: next, entity } = addProject(store, {
+    id: newId(),
+    created: nowIso(),
+    title: opts.title,
+    note: opts.note ?? null,
   })
-  return renderProjectList(projects)
+  writeStore(dataDir, next)
+  return json(entity)
 }
 
-export function addProjectCmd(
-  vaultFlag: string | undefined,
-  slug: string,
-  title: string | undefined,
-  notes: string | undefined,
-): string {
-  const vault = loadVault(resolveVault(vaultFlag))
-  const project = createProject(vault, slug, title, notes)
-  return renderProjectHeading('Created new project.', {
-    slug: project.slug,
-    title: project.title,
-    notes: project.notes,
-  })
-}
+export type EditProjectOpts = { title?: string; note?: string }
 
-export function showProjectCmd(vaultFlag: string | undefined, slug: string): string {
-  const vault = loadVault(resolveVault(vaultFlag))
-  const project = readProject(vault, slug)
-  return renderProjectShow(project)
-}
-
-export function removeProjectCmd(vaultFlag: string | undefined, slug: string): string {
-  const vault = loadVault(resolveVault(vaultFlag))
-  const project = removeProject(vault, slug)
-  return `Removed project: ${project.slug}.`
-}
-
-export function editProjectCmd(
-  vaultFlag: string | undefined,
-  slug: string,
-  updates: { title?: string; notes?: string },
-): string {
-  const vault = loadVault(resolveVault(vaultFlag))
-  const project = editProject(vault, slug, updates)
-  return renderProjectHeading('Updated project.', {
-    slug: project.slug,
-    title: project.title,
-    notes: project.notes,
-  })
+export function editProjectCmd(id: string, opts: EditProjectOpts): string {
+  const { dataDir } = resolveDataDir()
+  const store = readStore(dataDir)
+  const patch: Parameters<typeof editList>[2] = {}
+  if (opts.title !== undefined) patch.title = opts.title
+  if (opts.note !== undefined) patch.note = opts.note === '' ? null : opts.note
+  const { store: next, entity } = editList(store, id, patch)
+  writeStore(dataDir, next)
+  return json(entity)
 }
