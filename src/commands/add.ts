@@ -1,7 +1,7 @@
 import { resolveDataDir } from '../core/config.js'
 import { requireFutureDate, resolveDueInput } from '../core/dates.js'
 import { InvalidArgument } from '../core/errors.js'
-import { addAction, addProject, addWaiting } from '../core/model.js'
+import { addAction, addDeadline, addProject, addWaiting } from '../core/model.js'
 import { newId, nowIso, readStore, writeStore } from '../core/store.js'
 import { json } from './shared.js'
 
@@ -63,6 +63,27 @@ export function addWaitingCmd(opts: { title: string; project?: string; note?: st
     id: newId(),
     created_at: nowIso(),
     title: opts.title,
+    project: opts.project ?? null,
+    note: opts.note ?? null,
+  })
+  writeStore(dataDir, next)
+  return json(entity)
+}
+
+export function addDeadlineCmd(opts: {
+  title: string
+  date: string
+  project?: string
+  note?: string
+}): string {
+  const date = requireFutureDate(opts.date)
+  const { dataDir } = resolveDataDir()
+  const store = readStore(dataDir)
+  const { store: next, entity } = addDeadline(store, {
+    id: newId(),
+    created_at: nowIso(),
+    title: opts.title,
+    date,
     project: opts.project ?? null,
     note: opts.note ?? null,
   })

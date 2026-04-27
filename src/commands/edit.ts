@@ -26,6 +26,7 @@ export type EditCmdOpts = {
   note?: string
   due?: string
   project?: string
+  date?: string
 }
 
 export function editCmd(id: string, opts: EditCmdOpts): string {
@@ -39,9 +40,11 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
   if (entity.type === 'project') {
     if (opts.start !== undefined) throw new InvalidArgument('--start is not allowed on projects')
     if (opts.due !== undefined) throw new InvalidArgument('--due is not allowed on projects')
+    if (opts.date !== undefined) throw new InvalidArgument('--date is not allowed on projects')
     if (opts.project !== undefined) throw new InvalidArgument('--project is not allowed on projects')
   } else if (entity.type === 'waiting') {
     if (opts.start !== undefined) throw new InvalidArgument('--start is not allowed on waiting items')
+    if (opts.date !== undefined) throw new InvalidArgument('--date is not allowed on waiting items')
     if (wantStatus === 'active' || wantStatus === 'deferred') {
       throw new InvalidArgument(
         `cannot ${wantStatus === 'deferred' ? 'defer' : 'activate'} waiting item ${id} ` +
@@ -49,6 +52,21 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
       )
     }
     if (opts.due !== undefined) throw new InvalidArgument('--due is not allowed on waiting items')
+  } else if (entity.type === 'deadline') {
+    if (opts.start !== undefined) throw new InvalidArgument('--start is not allowed on deadlines')
+    if (opts.due !== undefined) throw new InvalidArgument('--due is not allowed on deadlines')
+    if (wantStatus === 'completed') {
+      throw new InvalidArgument(
+        `cannot complete deadline ${id} (deadlines are not tasks; use drop)`,
+      )
+    }
+    if (wantStatus === 'deferred') {
+      throw new InvalidArgument(
+        `cannot defer deadline ${id} (deadlines have no deferred state)`,
+      )
+    }
+  } else if (entity.type === 'action') {
+    if (opts.date !== undefined) throw new InvalidArgument('--date is not allowed on actions')
   }
 
   if (opts.start !== undefined) {
@@ -61,6 +79,14 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
   let startVal: string | null | undefined = undefined
   if (opts.start !== undefined) {
     startVal = opts.start === '' ? null : requireFutureDate(opts.start)
+  }
+
+  let dateVal: string | undefined = undefined
+  if (opts.date !== undefined) {
+    if (opts.date === '') {
+      throw new InvalidArgument('date is required and cannot be empty')
+    }
+    dateVal = requireFutureDate(opts.date)
   }
 
   let effectiveStatus = wantStatus
@@ -85,7 +111,8 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
     opts.title !== undefined ||
     opts.note !== undefined ||
     opts.due !== undefined ||
-    opts.project !== undefined
+    opts.project !== undefined ||
+    dateVal !== undefined
   const startClearOnly = transition === null && startVal === null && entity.type === 'action'
 
   if (hasFieldEdits || startClearOnly) {
@@ -103,6 +130,7 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
       if (opts.due !== undefined) patch.due = opts.due === '' ? null : resolveDueInput(opts.due)
       if (opts.project !== undefined) patch.project = opts.project === '' ? null : opts.project
       if (startClearOnly) patch.start_at = null
+      if (dateVal !== undefined) patch.date = dateVal
       const result = editItem(nextStore, id, patch)
       nextStore = result.store
       nextEntity = result.entity

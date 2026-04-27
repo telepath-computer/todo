@@ -3,8 +3,10 @@ import { describe, it } from 'node:test'
 import { InvalidArgument, NotFound, NothingToEdit } from '../src/core/errors.js'
 import {
   EMPTY_STORE,
+  activeDeadlines,
   activeProjects,
   addAction,
+  addDeadline,
   addProject,
   addWaiting,
   deferredActions,
@@ -20,6 +22,7 @@ import {
   resolveRef,
   setStatus,
   type ActionItem,
+  type DeadlineItem,
   type ProjectList,
   type Store,
   type WaitingItem,
@@ -429,5 +432,203 @@ describe('resolveRef', () => {
 
   it('throws NotFound on unknown id', () => {
     assert.throws(() => resolveRef(seed(), 'NOPE'), NotFound)
+  })
+})
+
+// Deadlines ------------------------------------------------------------
+
+function seedWithDeadlines(): Store {
+  let s = seed()
+  s = addDeadline(s, { id: 'D1', created_at: T0, title: 'Q3 launch', date: FUTURE, project: 'P1' }).store
+  s = addDeadline(s, { id: 'D2', created_at: T0, title: 'standalone', date: FUTURE, project: null }).store
+  return s
+}
+
+describe('addDeadline', () => {
+  it('creates an active deadline with project and note', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
+    const { entity } = addDeadline(s, {
+      id: 'D1',
+      created_at: T0,
+      title: 'Q3 launch',
+      date: FUTURE,
+      project: 'P1',
+      note: 'tracking',
+    })
+    assert.equal(entity.type, 'deadline')
+    assert.equal(entity.title, 'Q3 launch')
+    assert.equal(entity.date, FUTURE)
+    assert.equal(entity.status, 'active')
+    assert.equal(entity.closed_at, null)
+    assert.equal(entity.project, 'P1')
+    assert.equal(entity.note, 'tracking')
+    assert.equal(entity.created_at, T0)
+  })
+
+  it('creates a standalone deadline', () => {
+    const { entity } = addDeadline(EMPTY_STORE, {
+      id: 'D1',
+      created_at: T0,
+      title: 'visa expires',
+      date: FUTURE,
+    })
+    assert.equal(entity.project, null)
+    assert.equal(entity.note, null)
+  })
+
+  it('rejects empty title', () => {
+    assert.throws(
+      () => addDeadline(EMPTY_STORE, { id: 'D1', created_at: T0, title: '   ', date: FUTURE }),
+      InvalidArgument,
+    )
+  })
+
+  it('rejects unknown parent project', () => {
+    assert.throws(
+      () =>
+        addDeadline(EMPTY_STORE, {
+          id: 'D1',
+          created_at: T0,
+          title: 'x',
+          date: FUTURE,
+          project: 'NOPE',
+        }),
+      InvalidArgument,
+    )
+  })
+})
+
+describe('setStatus on deadline', () => {
+  it('drops a deadline (sets closed_at)', () => {
+    const s = seedWithDeadlines()
+    const { entity } = setStatus(s, 'D1', { status: 'dropped', closed_at: T0 })
+    assert.equal((entity as DeadlineItem).type, 'deadline')
+    assert.equal((entity as DeadlineItem).status, 'dropped')
+    assert.equal((entity as DeadlineItem).closed_at, T0)
+  })
+
+  it('un-drops a deadline (active clears closed_at)', () => {
+    let s = seedWithDeadlines()
+    s = setStatus(s, 'D1', { status: 'dropped', closed_at: T0 }).store
+    const { entity } = setStatus(s, 'D1', { status: 'active' })
+    assert.equal((entity as DeadlineItem).status, 'active')
+    assert.equal((entity as DeadlineItem).closed_at, null)
+  })
+
+  it('rejects complete on a deadline', () => {
+    assert.throws(
+      () => setStatus(seedWithDeadlines(), 'D1', { status: 'completed', closed_at: T0 }),
+      (err: Error) =>
+        err instanceof InvalidArgument && /cannot complete deadline D1/.test(err.message),
+    )
+  })
+
+  it('rejects defer on a deadline', () => {
+    assert.throws(
+      () => setStatus(seedWithDeadlines(), 'D1', { status: 'deferred', start_at: null }),
+      (err: Error) =>
+        err instanceof InvalidArgument && /cannot defer deadline D1/.test(err.message),
+    )
+  })
+})
+
+describe('editItem on deadline', () => {
+  it('updates title, note, project on a deadline', () => {
+    let s = seedWithDeadlines()
+    const { store, entity } = editItem(s, 'D1', { title: 'Q3 launch (renamed)', project: null, note: 'changed' })
+    s = store
+    assert.equal(entity.type, 'deadline')
+    assert.equal(entity.title, 'Q3 launch (renamed)')
+    assert.equal(entity.project, null)
+    assert.equal(entity.note, 'changed')
+  })
+
+  it('updates date on a deadline', () => {
+    const s = seedWithDeadlines()
+    const { entity } = editItem(s, 'D1', { date: '2027-01-01' })
+    assert.equal((entity as DeadlineItem).date, '2027-01-01')
+  })
+
+  it('rejects --due on a deadline', () => {
+    assert.throws(
+      () => editItem(seedWithDeadlines(), 'D1', { due: '2026-12-31' }),
+      (err: Error) => err instanceof InvalidArgument && /--due.*not allowed.*deadline/i.test(err.message),
+    )
+  })
+
+  it('rejects --date on an action', () => {
+    assert.throws(
+      () => editItem(seedWithDeadlines(), 'A1', { date: '2026-12-31' }),
+      (err: Error) => err instanceof InvalidArgument && /--date.*not allowed.*action/i.test(err.message),
+    )
+  })
+
+  it('rejects --date on a waiting item', () => {
+    assert.throws(
+      () => editItem(seedWithDeadlines(), 'W1', { date: '2026-12-31' }),
+      (err: Error) => err instanceof InvalidArgument && /--date.*not allowed.*waiting/i.test(err.message),
+    )
+  })
+
+  it('throws NothingToEdit on empty patch for deadline', () => {
+    assert.throws(() => editItem(seedWithDeadlines(), 'D1', {}), NothingToEdit)
+  })
+})
+
+describe('activeDeadlines', () => {
+  it('includes status=active deadlines with date >= today and parent active', () => {
+    const s = seedWithDeadlines()
+    const ids = activeDeadlines(s, TODAY).map((d) => d.id).sort()
+    assert.deepEqual(ids, ['D1', 'D2'])
+  })
+
+  it('includes a deadline whose date equals today', () => {
+    let s: Store = EMPTY_STORE
+    s = addDeadline(s, { id: 'DT', created_at: T0, title: 'today', date: TODAY }).store
+    const ids = activeDeadlines(s, TODAY).map((d) => d.id)
+    assert.deepEqual(ids, ['DT'])
+  })
+
+  it('excludes dropped deadlines', () => {
+    let s = seedWithDeadlines()
+    s = setStatus(s, 'D1', { status: 'dropped', closed_at: T0 }).store
+    const ids = activeDeadlines(s, TODAY).map((d) => d.id)
+    assert.deepEqual(ids, ['D2'])
+  })
+
+  it('excludes deadlines whose date is in the past', () => {
+    let s: Store = EMPTY_STORE
+    s = addDeadline(s, { id: 'PD', created_at: T0, title: 'past', date: PAST }).store
+    const ids = activeDeadlines(s, TODAY).map((d) => d.id)
+    assert.deepEqual(ids, [])
+  })
+
+  it('excludes deadlines whose parent project is deferred', () => {
+    let s = seedWithDeadlines()
+    s = setStatus(s, 'P1', { status: 'deferred', start_at: null }).store
+    const ids = activeDeadlines(s, TODAY).map((d) => d.id)
+    assert.deepEqual(ids, ['D2'])
+  })
+
+  it('excludes deadlines whose parent project is terminal', () => {
+    let s = seedWithDeadlines()
+    s = setStatus(s, 'P1', { status: 'completed', closed_at: T0 }).store
+    const ids = activeDeadlines(s, TODAY).map((d) => d.id)
+    assert.deepEqual(ids, ['D2'])
+  })
+})
+
+describe('liveActions / liveWaiting do not surface deadlines', () => {
+  it('liveActions excludes deadline items', () => {
+    const s = seedWithDeadlines()
+    const types = new Set(liveActions(s).map((a) => a.type))
+    assert.deepEqual([...types], ['action'])
+  })
+
+  it('liveWaiting excludes deadline items', () => {
+    const s = seedWithDeadlines()
+    const types = new Set(liveWaiting(s).map((w) => w.type))
+    assert.deepEqual([...types], ['waiting'])
   })
 })

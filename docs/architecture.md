@@ -11,7 +11,7 @@ Implementation notes for the `todo` CLI. The user-facing surface is in
 - **IDs:** [`nanoid`](https://www.npmjs.com/package/nanoid) with custom 8-char
   alphanumeric alphabet.
 - **Date parsing:** [`chrono-node`](https://www.npmjs.com/package/chrono-node)
-  for natural-language `--due` and `--start`.
+  for natural-language `--due`, `--start`, and `--date`.
 - **No UI framework, no colors.** Output is JSON only; pretty-printed with
   sorted keys via `JSON.stringify(value, sortedReplacer, 2)`.
 
@@ -23,16 +23,16 @@ Three layers, no view layer (storage shape == display shape):
 src/
 ├── cli.ts                 commander wiring
 ├── commands/              thin glue: parse args → call model → persist → JSON.stringify
-│   ├── add.ts             addProjectCmd / addActionCmd / addWaitingCmd
+│   ├── add.ts             addProjectCmd / addActionCmd / addWaitingCmd / addDeadlineCmd
 │   ├── config.ts          set-data-dir / config
-│   ├── edit.ts            polymorphic on entity (project / action / waiting)
+│   ├── edit.ts            polymorphic on entity (project / action / waiting / deadline)
 │   ├── lifecycle.ts       activate / defer / complete / drop
 │   ├── list.ts            todo list (with --all)
 │   ├── shared.ts          json() helper
 │   └── show.ts
 └── core/
     ├── config.ts          ~/.todo/config.json + dataDir resolution (env > config > default)
-    ├── dates.ts           --due parser (chrono-node)
+    ├── dates.ts           --due / --date parser (chrono-node), todayLocal, requireFutureDate
     ├── errors.ts          DoError, NotFound, NothingToEdit, InvalidArgument, InvalidDate
     ├── model.ts           types, mutators, bucket helpers, resolveRef, lookups
     └── store.ts           store.json I/O, atomic write, nanoid, sorted-key stringify
@@ -53,13 +53,16 @@ src/
   `setStatus` takes a discriminated `StatusTransition` so each branch carries
   exactly the data it needs (`closed_at` for terminal, `start_at` for
   deferred). Validators throw typed errors. Bucket helpers (`liveActions`,
-  `deferredActions`, `liveWaiting`, `activeProjects`, `deferredProjects`)
-  implement filter rules including parent-state cascade and the past-due-
-  scheduled bridge: a deferred action with `start_at <= today` shows up in
-  `liveActions` and is excluded from `deferredActions`.
-- **`dates.ts`** parses `--due`/`--start` inputs (chrono + ISO passthrough)
-  and exposes `todayLocal()` and `requireFutureDate()` for the strictly-future
-  invariant on `start_at`.
+  `deferredActions`, `liveWaiting`, `activeProjects`, `deferredProjects`,
+  `activeDeadlines`) implement filter rules including parent-state cascade
+  and the past-due-scheduled bridge: a deferred action with `start_at <= today`
+  shows up in `liveActions` and is excluded from `deferredActions`.
+  `activeDeadlines` and the action helpers all take a `today: string`
+  (YYYY-MM-DD) parameter so the model stays free of `Date.now()`;
+  `commands/list.ts` computes today via `todayLocal()`.
+- **`dates.ts`** parses `--due`/`--start`/`--date` inputs (chrono + ISO
+  passthrough) and exposes `todayLocal()` and `requireFutureDate()` for the
+  strictly-future invariant on `start_at` and deadline `date`.
 - **`config.ts`** is the gate for data-dir paths. Both `writeConfig` and
   `resolveDataDir` reject non-absolute paths via a shared `requireAbsolute`
   check. `TODO_DATA_DIR=relative/foo` fails fast on resolve.
@@ -91,8 +94,9 @@ Test runner: `node --import tsx --test tests/*.test.ts`. Three layers:
   `child_process.spawnSync` with a sandboxed `$HOME` and `TODO_DATA_DIR`.
   Every one of the 13 commands has at least one happy-path test plus error
   paths (NotFound, NothingToEdit, mutually-exclusive flags, waiting +
-  lifecycle, relative paths, malformed store, unparseable `--due`, chrono
-  natural language, parent-deferred cascade, `ls` alias).
+  lifecycle, deadline + lifecycle, past-date rejection on add and edit,
+  parent-deferred cascade, relative paths, malformed store, unparseable
+  `--due`/`--date`, chrono natural language).
 
 ## Conventions
 

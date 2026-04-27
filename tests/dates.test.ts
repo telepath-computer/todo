@@ -60,31 +60,48 @@ describe('dates.todayLocal', () => {
   })
 
   it('formats the reference date in local time', () => {
-    const ref = new Date(2026, 4, 15)
-    assert.equal(todayLocal(ref), '2026-05-15')
+    const ref = new Date(2026, 3, 27) // April 27, 2026 local
+    assert.equal(todayLocal(ref), '2026-04-27')
+  })
+
+  it('zero-pads single-digit months and days', () => {
+    const ref = new Date(2026, 0, 5) // January 5, 2026 local
+    assert.equal(todayLocal(ref), '2026-01-05')
   })
 })
 
 describe('dates.requireFutureDate', () => {
-  it('accepts a future date', () => {
+  it('accepts a future YYYY-MM-DD', () => {
     const ref = new Date(2026, 4, 15)
-    assert.equal(requireFutureDate('2026-06-01', ref), '2026-06-01')
+    assert.equal(requireFutureDate('2026-09-30', ref), '2026-09-30')
+  })
+
+  it('accepts future natural language', () => {
+    const ref = new Date(2026, 4, 15)
     assert.equal(requireFutureDate('tomorrow', ref), '2026-05-16')
   })
 
   it('rejects today', () => {
     const ref = new Date(2026, 4, 15)
+    assert.throws(
+      () => requireFutureDate('2026-05-15', ref),
+      (err: Error) =>
+        err instanceof InvalidArgument && /date must be in the future: 2026-05-15/.test(err.message),
+    )
     assert.throws(() => requireFutureDate('today', ref), InvalidArgument)
-    assert.throws(() => requireFutureDate('2026-05-15', ref), InvalidArgument)
   })
 
   it('rejects past dates', () => {
     const ref = new Date(2026, 4, 15)
-    assert.throws(() => requireFutureDate('2026-01-01', ref), InvalidArgument)
+    assert.throws(
+      () => requireFutureDate('2026-01-01', ref),
+      (err: Error) =>
+        err instanceof InvalidArgument && /date must be in the future: 2026-01-01/.test(err.message),
+    )
     assert.throws(() => requireFutureDate('yesterday', ref), InvalidArgument)
   })
 
-  it('rejects gibberish with InvalidDate (delegated)', () => {
+  it('propagates InvalidDate from unparseable input', () => {
     assert.throws(() => requireFutureDate('asdfghjkl'), InvalidDate)
   })
 })

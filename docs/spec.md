@@ -1,7 +1,7 @@
 # todo — spec
 
-JSON-storage CLI for GTD-style projects, actions, and waiting items. Agent-first;
-JSON-only output.
+JSON-storage CLI for GTD-style projects, actions, waiting items, and deadlines.
+Agent-first; JSON-only output.
 
 ## Storage
 
@@ -64,6 +64,7 @@ Discriminated subtypes — each entity carries only the fields it actually has.
 ```typescript
 type Status = 'active' | 'deferred' | 'completed' | 'dropped'
 type WaitingStatus = Exclude<Status, 'deferred'>   // 'active' | 'completed' | 'dropped'
+type DeadlineStatus = 'active' | 'dropped'         // no 'deferred', no 'completed'
 
 type BaseList = {
   id: string                   // 8-char nanoid
@@ -102,7 +103,14 @@ type WaitingItem = BaseItem & {
   closed_at: string | null
 }
 
-type Item = ActionItem | WaitingItem
+type DeadlineItem = BaseItem & {
+  type: 'deadline'
+  status: DeadlineStatus       // 'active' | 'dropped' only
+  date: string                 // YYYY-MM-DD; required, never null
+  closed_at: string | null     // non-null iff status='dropped'
+}
+
+type Item = ActionItem | WaitingItem | DeadlineItem
 
 type Store = { lists: List[]; items: Item[] }
 ```
@@ -111,6 +119,10 @@ type Store = { lists: List[]; items: Item[] }
 
 - `closed_at` is non-null iff `status` is `completed` or `dropped`.
 - `WaitingItem.status` excludes `'deferred'`; only `active`, `completed`, `dropped`.
+- `DeadlineItem.status` is `'active' | 'dropped'` only — no `deferred`, no `completed`.
+- `DeadlineItem.date` is `YYYY-MM-DD`, required, never null. Must be in the
+  future at the moment it's written (add or edit). Past dates are allowed only
+  by passage of time; bucket math hides them.
 - `Item.project` references an existing `List.id` or is `null`.
 - `created_at` is set once on insert, never edited.
 - `id` is set once on insert, never reused, never edited.
@@ -129,13 +141,13 @@ up across both `lists` and `items`.
 
 ## CLI surface
 
-12 commands. JSON-only output. Errors are plain text on stderr with non-zero exit.
+13 commands. JSON-only output. Errors are plain text on stderr with non-zero exit.
 
 ### Reads
 
 | Command | Returns |
 |---|---|
-| `todo list` | `{ active_actions, waiting, active_projects }` |
+| `todo list` | `{ active_actions, active_projects, deadlines, waiting }` |
 | `todo list --all` | also `{ deferred_actions, deferred_projects }` |
 | `todo show <id>` | the canonical entity |
 
@@ -144,6 +156,7 @@ up across both `lists` and `items`.
 - `active_actions`: `type=action && parent.active && (status=active || (status=deferred && start_at != null && start_at <= today))`.
 - `deferred_actions`: `type=action && status=deferred && (start_at == null || start_at > today) && parent.active` — both open-ended (someday/maybe) and future-scheduled actions.
 - `waiting`: `type=waiting && status=active && parent.active`.
+- `deadlines`: `type=deadline && status=active && date >= today && parent.active`.
 - `active_projects`: `type=project && status=active`.
 - `deferred_projects`: `type=project && status=deferred`.
 
@@ -152,28 +165,33 @@ Past-due scheduled items (`start_at <= today`) are auto-promoted into
 `deferred` — the dashboard view is the source of effective state.
 
 Children of a deferred or terminal project are hidden from `todo list`. Inspect
-them via `todo show <id>` directly. Terminal items are intentionally not
-surfaced in any list view; query by id.
+them via `todo show <id>` directly. Terminal items, dropped deadlines, and
+past-date deadlines are intentionally not surfaced in any list view; query by
+id.
 
 ### Create
 
 Verb-first: `todo add <type> --title "..." [type-specific flags]`.
 
 ```
-todo add project --title "<text>" [--note <text>]
-todo add action  --title "<text>" (--active | --deferred | --start <date>)
-                                  [--project <id>] [--due <date>] [--note <text>]
-todo add waiting --title "<text>" [--project <id>] [--note <text>]
+todo add project  --title "<text>" [--note <text>]
+todo add action   --title "<text>" (--active | --deferred | --start <date>)
+                                   [--project <id>] [--due <date>] [--note <text>]
+todo add waiting  --title "<text>" [--project <id>] [--note <text>]
+todo add deadline --title "<text>" --date <date> [--project <id>] [--note <text>]
 ```
 
 - `add project` creates a `ProjectList` at `status=active`.
 - `add action` requires at least one of `--active`, `--deferred`, or `--start
   <date>`. `--start <date>` alone implies `--deferred`. `--active` and
   `--deferred` are mutually exclusive; `--active --start ...` is rejected.
-- `--due` and `--start` accept `YYYY-MM-DD` or natural language (`tomorrow`,
-  `next friday`). `--start` must resolve to a strictly-future date; `""` is
-  rejected on `add` (use `edit` to clear later).
+- `--due`, `--start`, and `--date` accept `YYYY-MM-DD` or natural language
+  (`tomorrow`, `next friday`). `--start` and `--date` must resolve to a
+  strictly-future date; `--start ""` is rejected on `add` (use `edit` to
+  clear later).
 - `add waiting` creates a `WaitingItem` at `status=active`. No `--due`, no `--start`.
+- `add deadline` creates a `DeadlineItem` at `status=active`. `--date` is
+  required and must be a future date (today and past dates rejected).
 - `--project <id>` must reference an existing project.
 
 ### Edit (polymorphic on id)
@@ -184,7 +202,7 @@ todo add waiting --title "<text>" [--project <id>] [--note <text>]
 ```
 todo edit <id> [--active | --deferred | --completed | --dropped]
               [--start <date>]
-              [--title ...] [--note ...] [--due ...] [--project ...]
+              [--title ...] [--note ...] [--due ...] [--project ...] [--date ...]
 ```
 
 Field semantics:
@@ -192,7 +210,10 @@ Field semantics:
 - Omit a flag to leave the field unchanged.
 - Pass `""` to clear: `--note ""`, `--due ""`, `--project ""`, `--start ""`.
 - `--title ""` is rejected (title is required).
-- `--due` is rejected on projects and waiting items.
+- `--date ""` is rejected (deadline date is required).
+- `--due` is rejected on projects, waiting items, and deadlines.
+- `--date` is only valid on deadlines; rejected on projects, actions, and
+  waiting items. New value must be a future date.
 - `--project` is rejected on projects.
 - `--start` is rejected on projects and waiting items.
 - `--start <future>` on an action with no explicit status flag implicitly
@@ -235,7 +256,9 @@ Entity-type rules:
 
 - `--active` and `--deferred` reject waiting items (waiting has no `deferred`
   state and no resurrection path; terminal waiting items stay terminal).
-- `--start` rejects projects and waiting items.
+- `--start` rejects projects, waiting items, and deadlines.
+- `complete` and `defer` reject deadlines (deadlines are not tasks; they
+  only transition to `dropped`, and `activate` un-drops).
 - `activate`/`defer` are also how you bring a completed/dropped action or
   project back to a live state — they clear `closed_at`. There is no
   `reopen` verb.
@@ -269,15 +292,23 @@ Plain text on stderr, prefixed with `todo:`, exit code 1.
 | `--active or --deferred is required for actions` | `add action` without a status flag |
 | `--active and --deferred are mutually exclusive` | both passed to `add action` |
 | `--due is not allowed on waiting items` | edit waiting with `--due` |
+| `--due is not allowed on deadlines` | edit deadline with `--due` |
 | `--due is not allowed on projects` | edit project with `--due` |
+| `--date is not allowed on actions` | edit action with `--date` |
+| `--date is not allowed on waiting items` | edit waiting with `--date` |
+| `--date is not allowed on projects` | edit project with `--date` |
 | `--project is not allowed on projects` | edit project with `--project` |
 | `unknown project: <id>` | parent ref doesn't resolve |
 | `cannot activate waiting item <id> (...)` | `activate`/`defer` on a waiting item |
+| `cannot complete deadline <id> (deadlines are not tasks; use drop)` | `complete` on a deadline |
+| `cannot defer deadline <id> (deadlines have no deferred state)` | `defer` on a deadline |
+| `date is required and cannot be empty` | `edit <deadline-id> --date ""` |
+| `date must be in the future: <input>` | `add deadline --date <past-or-today>` or `edit --date <past-or-today>` |
 | `data dir must be an absolute path (...)` | relative path in env or config |
 | `malformed store.json at ...` | file present but not parseable JSON |
-| `could not parse date: <input>` | unparseable `--due` or `--start` |
+| `could not parse date: <input>` | unparseable `--due`, `--start`, or `--date` |
 | `title is required and cannot be empty` | empty title on add or edit |
-| `start date must be in the future` | `--start` resolves to today or past |
+| `date must be in the future: <input>` | `--start` or deadline `--date` resolves to today or past |
 | `--active, --deferred, or --start is required for actions` | `add action` with no mode flag |
 | `--start cannot combine with --active` | `add action --active --start ...` |
 | `--start requires --deferred` | `edit <id> --active --start ...` |

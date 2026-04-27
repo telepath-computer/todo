@@ -1,4 +1,5 @@
 import {
+  activeDeadlines,
   activeProjects,
   deferredActions,
   deferredProjects,
@@ -17,6 +18,7 @@ export function listCmd(opts: { all?: boolean }): string {
   const out: Record<string, unknown> = {
     active_actions: liveActions(store, today),
     active_projects: activeProjects(store),
+    deadlines: activeDeadlines(store, today),
     waiting: liveWaiting(store),
   }
   if (opts.all) {

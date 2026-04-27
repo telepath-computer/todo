@@ -17,6 +17,10 @@ function formatLocal(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
+export function todayLocal(reference: Date = new Date()): string {
+  return formatLocal(reference)
+}
+
 export function resolveDueInput(input: string, reference: Date = new Date()): string {
   const raw = input.trim()
   if (ISO_RE.test(raw)) return raw
@@ -25,15 +29,10 @@ export function resolveDueInput(input: string, reference: Date = new Date()): st
   return formatLocal(parsed)
 }
 
-export function todayLocal(reference: Date = new Date()): string {
-  return formatLocal(reference)
-}
-
 export function requireFutureDate(input: string, reference: Date = new Date()): string {
   const resolved = resolveDueInput(input, reference)
-  const today = todayLocal(reference)
-  if (resolved <= today) {
-    throw new InvalidArgument('start date must be in the future')
+  if (resolved <= todayLocal(reference)) {
+    throw new InvalidArgument(`date must be in the future: ${input}`)
   }
   return resolved
 }

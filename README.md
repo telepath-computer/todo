@@ -5,7 +5,7 @@ JSON-only output, stable refs, predictable shapes. Humans can read it too.
 
 ## What it does
 
-Three things go in your todo, in GTD shorthand:
+Four things go in your todo, in GTD shorthand:
 
 - **Projects** — outcomes that take more than one action. Anything you're
   engaged with: "Telepath", "House move", "Q3 launch". Park them when life
@@ -17,14 +17,20 @@ Three things go in your todo, in GTD shorthand:
   the way until that day, then auto-shows on the dashboard.
 - **Waiting** — things blocking on someone else: "cover art from designer",
   "tax refund". You don't act on these; you watch them.
+- **Deadlines** — date markers, not tasks: "Q3 launch", "visa expires",
+  "tax filing day". They show on the dashboard until the date passes, then
+  silently disappear. You can `drop` one if it's cancelled, but you can't
+  "complete" it — a deadline is a fact about time.
 
-Anything finishes one of two ways: **completed** (done) or **dropped**
-(not happening). For projects and actions you can also flip them between
-active and deferred — useful when something heats up or cools off.
+Tasks (actions, projects) finish one of two ways: **completed** (done) or
+**dropped** (not happening). For projects and actions you can flip them
+between active and deferred too. Deadlines only `drop` (and `activate`
+un-drops); the date passing is what retires them.
 
 The dashboard view (`todo list`) shows what's *live*: the active actions you
-could do now, what you're waiting on, and which projects are in motion.
-`--all` adds the deferred stuff. Terminal items stay out of the way.
+could do now, what you're waiting on, upcoming deadlines, and which projects
+are in motion. `--all` adds the deferred stuff. Terminal items, dropped
+deadlines, and past-date deadlines stay out of the way.
 
 ## Install
 
@@ -68,10 +74,13 @@ $ todo add action --title "Renew domain" --deferred --start "next monday"
 
 $ todo add waiting --title "Cover art from designer" --project Vh8XLm2k
 
+$ todo add deadline --title "Q3 launch" --date "next quarter end" --project Vh8XLm2k
+
 $ todo list
 {
   "active_actions":  [ ... ],
   "active_projects": [ ... ],
+  "deadlines":       [ ... ],
   "waiting":         [ ... ]
 }
 

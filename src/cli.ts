@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
-import { addActionCmd, addProjectCmd, addWaitingCmd } from './commands/add.js'
+import {
+  addActionCmd,
+  addDeadlineCmd,
+  addProjectCmd,
+  addWaitingCmd,
+} from './commands/add.js'
 import { configCmd, setDataDirCmd } from './commands/config.js'
 import { editCmd } from './commands/edit.js'
 import {
@@ -91,9 +96,20 @@ add
     run(() => addWaitingCmd(opts))
   })
 
+add
+  .command('deadline')
+  .description('Create a deadline (date marker; not a task)')
+  .requiredOption('--title <text>', 'title')
+  .requiredOption('--date <date>', 'deadline date (YYYY-MM-DD or natural language; must be future)')
+  .option('--project <id>', 'parent project id')
+  .option('--note <text>', 'attach a note')
+  .action((opts: { title: string; date: string; project?: string; note?: string }) => {
+    run(() => addDeadlineCmd(opts))
+  })
+
 program
   .command('edit <id>')
-  .description('Edit any entity (project, action, or waiting)')
+  .description('Edit any entity (project, action, waiting, or deadline)')
   .option('--active', 'set status=active')
   .option('--deferred', 'set status=deferred')
   .option('--completed', 'set status=completed')
@@ -103,6 +119,7 @@ program
   .option('--note <text>', "note text; '' clears")
   .option('--due <date>', "due date; '' clears (action only)")
   .option('--project <id>', "parent project id; '' detaches (item only)")
+  .option('--date <date>', 'deadline date (deadline only; must be future)')
   .action(
     (
       id: string,
@@ -116,6 +133,7 @@ program
         note?: string
         due?: string
         project?: string
+        date?: string
       },
     ) => {
       run(() => editCmd(id, opts))

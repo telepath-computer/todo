@@ -4,6 +4,7 @@ import { InvalidArgument, NotFound, NothingToEdit } from './errors.js'
 
 export type Status = 'active' | 'deferred' | 'completed' | 'dropped'
 export type WaitingStatus = Exclude<Status, 'deferred'>
+export type DeadlineStatus = 'active' | 'dropped'
 
 export type BaseList = {
   id: string
@@ -42,7 +43,14 @@ export type WaitingItem = BaseItem & {
   closed_at: string | null
 }
 
-export type Item = ActionItem | WaitingItem
+export type DeadlineItem = BaseItem & {
+  type: 'deadline'
+  status: DeadlineStatus
+  date: string                 // YYYY-MM-DD; required, never null
+  closed_at: string | null     // non-null iff status='dropped'
+}
+
+export type Item = ActionItem | WaitingItem | DeadlineItem
 
 export type Store = {
   lists: List[]
@@ -183,6 +191,32 @@ export function addWaiting(s: Store, input: AddWaitingInput): { store: Store; en
   return { store: { ...s, items: [...s.items, entity] }, entity }
 }
 
+export type AddDeadlineInput = {
+  id: string
+  created_at: string
+  title: string
+  date: string
+  project?: string | null
+  note?: string | null
+}
+
+export function addDeadline(s: Store, input: AddDeadlineInput): { store: Store; entity: DeadlineItem } {
+  requireValidTitle(input.title)
+  requireListExists(s, input.project)
+  const entity: DeadlineItem = {
+    id: input.id,
+    type: 'deadline',
+    project: input.project ?? null,
+    title: input.title,
+    note: input.note ?? null,
+    created_at: input.created_at,
+    status: 'active',
+    date: input.date,
+    closed_at: null,
+  }
+  return { store: { ...s, items: [...s.items, entity] }, entity }
+}
+
 // Edit -----------------------------------------------------------------
 
 export type EditListPatch = {
@@ -208,6 +242,7 @@ export type EditItemPatch = {
   due?: string | null
   project?: string | null
   start_at?: string | null
+  date?: string
 }
 
 export function editItem(s: Store, id: string, patch: EditItemPatch): { store: Store; entity: Item } {
@@ -218,15 +253,28 @@ export function editItem(s: Store, id: string, patch: EditItemPatch): { store: S
     patch.note === undefined &&
     patch.due === undefined &&
     patch.project === undefined &&
-    patch.start_at === undefined
+    patch.start_at === undefined &&
+    patch.date === undefined
   ) {
     throw new NothingToEdit('nothing to edit')
   }
   if (patch.due !== undefined && item.type === 'waiting') {
     throw new InvalidArgument('--due is not allowed on waiting items')
   }
+  if (patch.due !== undefined && item.type === 'deadline') {
+    throw new InvalidArgument('--due is not allowed on deadlines')
+  }
   if (patch.start_at !== undefined && item.type === 'waiting') {
     throw new InvalidArgument('--start is not allowed on waiting items')
+  }
+  if (patch.start_at !== undefined && item.type === 'deadline') {
+    throw new InvalidArgument('--start is not allowed on deadlines')
+  }
+  if (patch.date !== undefined && item.type === 'action') {
+    throw new InvalidArgument('--date is not allowed on actions')
+  }
+  if (patch.date !== undefined && item.type === 'waiting') {
+    throw new InvalidArgument('--date is not allowed on waiting items')
   }
   if (patch.project !== undefined) requireListExists(s, patch.project)
 
@@ -237,6 +285,14 @@ export function editItem(s: Store, id: string, patch: EditItemPatch): { store: S
     if (patch.due !== undefined) next.due = patch.due
     if (patch.project !== undefined) next.project = patch.project
     if (patch.start_at !== undefined) next.start_at = patch.start_at
+    return { store: replaceItem(s, next), entity: next }
+  }
+  if (item.type === 'deadline') {
+    const next: DeadlineItem = { ...item }
+    if (patch.title !== undefined) next.title = requireValidTitle(patch.title)
+    if (patch.note !== undefined) next.note = patch.note
+    if (patch.date !== undefined) next.date = patch.date
+    if (patch.project !== undefined) next.project = patch.project
     return { store: replaceItem(s, next), entity: next }
   }
   const next: WaitingItem = { ...item }
@@ -271,6 +327,20 @@ export function setStatus(
       )
     }
     const next: WaitingItem = { ...e, status: t.status, closed_at }
+    return { store: replaceItem(s, next), entity: next }
+  }
+  if (e.type === 'deadline') {
+    if (t.status === 'completed') {
+      throw new InvalidArgument(
+        `cannot complete deadline ${id} (deadlines are not tasks; use drop)`,
+      )
+    }
+    if (t.status === 'deferred') {
+      throw new InvalidArgument(
+        `cannot defer deadline ${id} (deadlines have no deferred state)`,
+      )
+    }
+    const next: DeadlineItem = { ...e, status: t.status, closed_at }
     return { store: replaceItem(s, next), entity: next }
   }
   if (e.type === 'project') {
@@ -332,4 +402,14 @@ export function activeProjects(s: Store): ProjectList[] {
 
 export function deferredProjects(s: Store): ProjectList[] {
   return s.lists.filter((l) => l.type === 'project' && l.status === 'deferred')
+}
+
+export function activeDeadlines(s: Store, today: string): DeadlineItem[] {
+  return s.items.filter(
+    (i): i is DeadlineItem =>
+      i.type === 'deadline' &&
+      i.status === 'active' &&
+      i.date >= today &&
+      parentActive(s, i.project),
+  )
 }

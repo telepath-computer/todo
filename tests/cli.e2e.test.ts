@@ -4,6 +4,16 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { cleanup, makeTempDataDir, makeTempDir, parseJson, readJson, runCli } from './helpers.js'
 
+function ymd(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+const FUTURE = ymd(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000))
+const PAST = ymd(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000))
+
 type Status = 'active' | 'deferred' | 'completed' | 'dropped'
 
 type Project = {
@@ -40,21 +50,27 @@ type Waiting = {
   closed_at: string | null
 }
 
-type Item = Action | Waiting
+type Deadline = {
+  id: string
+  type: 'deadline'
+  title: string
+  project: string | null
+  note: string | null
+  created_at: string
+  status: 'active' | 'dropped'
+  date: string
+  closed_at: string | null
+}
+
+type Item = Action | Waiting | Deadline
 
 type ListOutput = {
   active_actions: Action[]
   active_projects: Project[]
+  deadlines: Deadline[]
   waiting: Waiting[]
   deferred_actions?: Action[]
   deferred_projects?: Project[]
-}
-
-function ymd(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
 }
 
 function futureDate(daysAhead = 30): string {
@@ -130,6 +146,18 @@ function addWaitingItem(
   return parseJson<Waiting>(r.stdout)
 }
 
+function addDeadlineItem(
+  title: string,
+  flags: { date: string; project?: string; note?: string },
+): Deadline {
+  const args = ['add', 'deadline', '--title', title, '--date', flags.date]
+  if (flags.project) args.push('--project', flags.project)
+  if (flags.note !== undefined) args.push('--note', flags.note)
+  const r = cli(...args)
+  assert.equal(r.code, 0, r.stderr)
+  return parseJson<Deadline>(r.stdout)
+}
+
 // ---- Reads ----------------------------------------------------------
 
 describe('todo list', () => {
@@ -137,7 +165,7 @@ describe('todo list', () => {
     const r = cli('list')
     assert.equal(r.code, 0)
     const out = parseJson<ListOutput>(r.stdout)
-    assert.deepEqual(out, { active_actions: [], active_projects: [], waiting: [] })
+    assert.deepEqual(out, { active_actions: [], active_projects: [], deadlines: [], waiting: [] })
   })
 
   it('includes active actions, waiting, and active projects only by default', () => {
@@ -473,7 +501,7 @@ describe('first run', () => {
       const r = runCli(['list'], { home, env: { TODO_DATA_DIR: dir } })
       assert.equal(r.code, 0, r.stderr)
       const out = parseJson<{ active_actions: unknown[] }>(r.stdout)
-      assert.deepEqual(out, { active_actions: [], active_projects: [], waiting: [] })
+      assert.deepEqual(out, { active_actions: [], active_projects: [], deadlines: [], waiting: [] })
       // Reading shouldn't have created the dir.
       assert.equal(existsSync(dir), false)
     } finally {
@@ -537,13 +565,13 @@ describe('start dates', () => {
     it('rejects --deferred --start today', () => {
       const r = cli('add', 'action', '--title', 'X', '--deferred', '--start', todayStr())
       assert.equal(r.code, 1)
-      assert.match(r.stderr, /start date must be in the future/i)
+      assert.match(r.stderr, /date must be in the future/i)
     })
 
     it('rejects --deferred --start <past>', () => {
       const r = cli('add', 'action', '--title', 'X', '--deferred', '--start', pastDate(1))
       assert.equal(r.code, 1)
-      assert.match(r.stderr, /start date must be in the future/i)
+      assert.match(r.stderr, /date must be in the future/i)
     })
 
     it('rejects --deferred --start ""', () => {
@@ -612,7 +640,7 @@ describe('start dates', () => {
       const a = addAction('x', { active: true })
       const r = cli('defer', a.id, '--start', pastDate(1))
       assert.equal(r.code, 1)
-      assert.match(r.stderr, /start date must be in the future/i)
+      assert.match(r.stderr, /date must be in the future/i)
     })
   })
 
@@ -776,5 +804,205 @@ describe('start dates', () => {
       assert.equal(out.active_actions.length, 1)
       assert.equal(out.active_actions[0].start_at, null)
     })
+  })
+})
+
+// ---- Deadlines ------------------------------------------------------
+
+describe('todo add deadline', () => {
+  it('creates an active deadline with project and note', () => {
+    const proj = addProject('Telepath')
+    const d = addDeadlineItem('Q3 launch', { date: FUTURE, project: proj.id, note: 'tracking' })
+    assert.equal(d.type, 'deadline')
+    assert.equal(d.title, 'Q3 launch')
+    assert.equal(d.date, FUTURE)
+    assert.equal(d.status, 'active')
+    assert.equal(d.closed_at, null)
+    assert.equal(d.project, proj.id)
+    assert.equal(d.note, 'tracking')
+    assert.match(d.id, /^[0-9a-zA-Z]{8}$/)
+  })
+
+  it('creates a standalone deadline', () => {
+    const d = addDeadlineItem('visa expires', { date: FUTURE })
+    assert.equal(d.project, null)
+    assert.equal(d.note, null)
+  })
+
+  it('rejects past --date', () => {
+    const r = cli('add', 'deadline', '--title', 'past', '--date', PAST)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /date must be in the future/i)
+  })
+
+  it('rejects today as --date', () => {
+    const r = cli('add', 'deadline', '--title', 'today', '--date', 'today')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /date must be in the future/i)
+  })
+
+  it('errors on unknown --project', () => {
+    const r = cli('add', 'deadline', '--title', 'x', '--date', FUTURE, '--project', 'noSuchPr')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /unknown project/i)
+  })
+
+  it('errors when --date is missing', () => {
+    const r = cli('add', 'deadline', '--title', 'x')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /required option.*--date/i)
+  })
+
+  it('rejects empty title', () => {
+    const r = cli('add', 'deadline', '--title', '   ', '--date', FUTURE)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /title is required/i)
+  })
+
+  it('resolves natural-language --date via chrono', () => {
+    const d = addDeadlineItem('Tomorrow event', { date: 'tomorrow' })
+    assert.match(d.date, /^\d{4}-\d{2}-\d{2}$/)
+  })
+})
+
+describe('todo edit on deadlines', () => {
+  it('updates the date on a deadline', () => {
+    const d = addDeadlineItem('x', { date: FUTURE })
+    const later = ymd(new Date(Date.now() + 60 * 24 * 60 * 60 * 1000))
+    const out = parseJson<Deadline>(cli('edit', d.id, '--date', later).stdout)
+    assert.equal(out.date, later)
+  })
+
+  it('rejects --date "" on deadlines', () => {
+    const d = addDeadlineItem('x', { date: FUTURE })
+    const r = cli('edit', d.id, '--date', '')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /date is required and cannot be empty/i)
+  })
+
+  it('rejects past --date on edit', () => {
+    const d = addDeadlineItem('x', { date: FUTURE })
+    const r = cli('edit', d.id, '--date', PAST)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /date must be in the future/i)
+  })
+
+  it('rejects --due on a deadline', () => {
+    const d = addDeadlineItem('x', { date: FUTURE })
+    const r = cli('edit', d.id, '--due', '2026-12-31')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /--due.*not allowed.*deadline/i)
+  })
+
+  it('rejects --date on an action', () => {
+    const a = addAction('x', { active: true })
+    const r = cli('edit', a.id, '--date', FUTURE)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /--date.*not allowed.*action/i)
+  })
+
+  it('rejects --date on a waiting item', () => {
+    const w = addWaitingItem('x')
+    const r = cli('edit', w.id, '--date', FUTURE)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /--date.*not allowed.*waiting/i)
+  })
+
+  it('rejects --date on a project', () => {
+    const p = addProject('p')
+    const r = cli('edit', p.id, '--date', FUTURE)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /--date.*not allowed.*project/i)
+  })
+
+  it('updates title, note, project on a deadline', () => {
+    const proj = addProject('p')
+    const d = addDeadlineItem('x', { date: FUTURE })
+    const out = parseJson<Deadline>(
+      cli('edit', d.id, '--title', 'renamed', '--note', 'n', '--project', proj.id).stdout,
+    )
+    assert.equal(out.title, 'renamed')
+    assert.equal(out.note, 'n')
+    assert.equal(out.project, proj.id)
+  })
+})
+
+describe('lifecycle on deadlines', () => {
+  it('rejects complete with the deadline-specific message', () => {
+    const d = addDeadlineItem('x', { date: FUTURE })
+    const r = cli('complete', d.id)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /cannot complete deadline .*deadlines are not tasks; use drop/i)
+  })
+
+  it('rejects defer with the deadline-specific message', () => {
+    const d = addDeadlineItem('x', { date: FUTURE })
+    const r = cli('defer', d.id)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /cannot defer deadline .*deadlines have no deferred state/i)
+  })
+
+  it('drop then activate round-trips', () => {
+    const d = addDeadlineItem('x', { date: FUTURE })
+    const dropped = parseJson<Deadline>(cli('drop', d.id).stdout)
+    assert.equal(dropped.status, 'dropped')
+    assert.notEqual(dropped.closed_at, null)
+    const reactivated = parseJson<Deadline>(cli('activate', d.id).stdout)
+    assert.equal(reactivated.status, 'active')
+    assert.equal(reactivated.closed_at, null)
+  })
+})
+
+describe('todo list with deadlines', () => {
+  it('includes active deadlines under the deadlines bucket', () => {
+    const d = addDeadlineItem('Q3', { date: FUTURE })
+    const out = parseJson<ListOutput>(cli('list').stdout)
+    assert.deepEqual(out.deadlines.map((x) => x.id), [d.id])
+  })
+
+  it('hides dropped deadlines from list', () => {
+    const d = addDeadlineItem('drop me', { date: FUTURE })
+    cli('drop', d.id)
+    const out = parseJson<ListOutput>(cli('list').stdout)
+    assert.deepEqual(out.deadlines, [])
+  })
+
+  it('hides past-date deadlines from list (via direct store write)', () => {
+    // CLI rejects past dates at write time; simulate the "passage of time"
+    // case by writing a past-dated deadline directly.
+    mkdirSync(dataDir, { recursive: true })
+    const past: Deadline = {
+      id: 'pastpast',
+      type: 'deadline',
+      title: 'expired',
+      project: null,
+      note: null,
+      created_at: '2026-01-01T00:00:00Z',
+      status: 'active',
+      date: PAST,
+      closed_at: null,
+    }
+    writeFileSync(
+      join(dataDir, 'store.json'),
+      JSON.stringify({ items: [past], lists: [] }, null, 2) + '\n',
+    )
+    const out = parseJson<ListOutput>(cli('list').stdout)
+    assert.deepEqual(out.deadlines, [])
+  })
+
+  it('--all does not surface dropped or past deadlines', () => {
+    const d1 = addDeadlineItem('keep', { date: FUTURE })
+    const d2 = addDeadlineItem('drop me', { date: FUTURE })
+    cli('drop', d2.id)
+    const out = parseJson<ListOutput>(cli('list', '--all').stdout)
+    assert.deepEqual(out.deadlines.map((x) => x.id), [d1.id])
+  })
+
+  it('hides deadlines whose parent project is deferred', () => {
+    const proj = addProject('P')
+    const d = addDeadlineItem('child', { date: FUTURE, project: proj.id })
+    cli('defer', proj.id)
+    const out = parseJson<ListOutput>(cli('list').stdout)
+    assert.equal(out.deadlines.find((x) => x.id === d.id), undefined)
   })
 })
