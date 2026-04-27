@@ -64,7 +64,7 @@ function cli(...args: string[]) {
 }
 
 function addProject(title: string, opts: { note?: string } = {}): Project {
-  const args = ['projects', 'add', '--title', title]
+  const args = ['add', 'project', '--title', title]
   if (opts.note !== undefined) args.push('--note', opts.note)
   const r = cli(...args)
   assert.equal(r.code, 0, r.stderr)
@@ -75,7 +75,7 @@ function addAction(
   title: string,
   flags: { active?: boolean; deferred?: boolean; project?: string; due?: string; note?: string } = {},
 ): Action {
-  const args = ['add', '--title', title]
+  const args = ['add', 'action', '--title', title]
   if (flags.active) args.push('--active')
   if (flags.deferred) args.push('--deferred')
   if (flags.project) args.push('--project', flags.project)
@@ -90,7 +90,7 @@ function addWaitingItem(
   title: string,
   flags: { project?: string; note?: string } = {},
 ): Waiting {
-  const args = ['add', '--title', title, '--waiting']
+  const args = ['add', 'waiting', '--title', title]
   if (flags.project) args.push('--project', flags.project)
   if (flags.note !== undefined) args.push('--note', flags.note)
   const r = cli(...args)
@@ -213,26 +213,20 @@ describe('todo add', () => {
     assert.equal(w.project, null)
   })
 
-  it('errors when no mode flag is given', () => {
-    const r = cli('add', '--title', 'X')
+  it('errors when neither --active nor --deferred is given on action', () => {
+    const r = cli('add', 'action', '--title', 'X')
     assert.equal(r.code, 1)
-    assert.match(r.stderr, /--active.*--deferred.*--waiting.*required/i)
+    assert.match(r.stderr, /--active or --deferred is required/i)
   })
 
-  it('errors when multiple mode flags are given', () => {
-    const r = cli('add', '--title', 'X', '--active', '--waiting')
+  it('errors when both --active and --deferred are given', () => {
+    const r = cli('add', 'action', '--title', 'X', '--active', '--deferred')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /mutually exclusive/i)
   })
 
-  it('errors on --due with --waiting', () => {
-    const r = cli('add', '--title', 'X', '--waiting', '--due', '2026-05-01')
-    assert.equal(r.code, 1)
-    assert.match(r.stderr, /--due.*not allowed.*waiting/i)
-  })
-
   it('errors on unknown --project', () => {
-    const r = cli('add', '--title', 'X', '--active', '--project', 'noSuchPr')
+    const r = cli('add', 'action', '--title', 'X', '--active', '--project', 'noSuchPr')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /unknown project/i)
   })
@@ -251,7 +245,7 @@ describe('todo add', () => {
   })
 
   it('rejects unparseable --due', () => {
-    const r = cli('add', '--title', 'X', '--active', '--due', 'asdfghjkl')
+    const r = cli('add', 'action', '--title', 'X', '--active', '--due', 'asdfghjkl')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /could not parse date/i)
   })
@@ -308,16 +302,26 @@ describe('todo projects add/edit', () => {
     assert.equal(p.closed_at, null)
   })
 
-  it('edits a project, clearing note with ""', () => {
+  it('edits a project via polymorphic edit, clearing note with ""', () => {
     const p = addProject('X', { note: 'a' })
-    const r = cli('projects', 'edit', p.id, '--note', '')
+    const r = cli('edit', p.id, '--note', '')
     assert.equal(r.code, 0)
     const out = parseJson<Project>(r.stdout)
     assert.equal(out.note, null)
   })
 
-  it('rejects empty title on add', () => {
-    const r = cli('projects', 'add', '--title', '   ')
+  it('rejects --due / --project on a project edit', () => {
+    const p = addProject('P')
+    let r = cli('edit', p.id, '--due', '2026-05-01')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /--due.*not allowed.*project/i)
+    r = cli('edit', p.id, '--project', 'x')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /--project.*not allowed.*project/i)
+  })
+
+  it('rejects empty title on add project', () => {
+    const r = cli('add', 'project', '--title', '   ')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /title is required/i)
   })

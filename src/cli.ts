@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
-import { addCmd } from './commands/add.js'
+import { addActionCmd, addProjectCmd, addWaitingCmd } from './commands/add.js'
 import { configCmd, setDataDirCmd } from './commands/config.js'
 import { editCmd } from './commands/edit.js'
 import {
@@ -10,7 +10,6 @@ import {
   dropCmd,
 } from './commands/lifecycle.js'
 import { listCmd } from './commands/list.js'
-import { addProjectCmd, editProjectCmd } from './commands/projects.js'
 import { showCmd } from './commands/show.js'
 import { DoError } from './core/errors.js'
 
@@ -35,7 +34,7 @@ program
 program
   .command('list')
   .alias('ls')
-  .description('List active actions, waiting items, and active projects')
+  .description('Active actions, waiting items, and active projects')
   .option('--all', 'also include deferred actions and deferred projects')
   .action((opts: { all?: boolean }) => {
     run(() => listCmd({ all: opts.all }))
@@ -48,37 +47,56 @@ program
     run(() => showCmd(id))
   })
 
-program
-  .command('add')
-  .description('Add an action or waiting item')
+const add = program.command('add').description('Create a new entity')
+
+add
+  .command('project')
+  .description('Create a project')
   .requiredOption('--title <text>', 'title')
-  .option('--active', 'create an active action (next action)')
-  .option('--deferred', 'create a deferred action (someday/maybe)')
-  .option('--waiting', 'create a waiting item')
+  .option('--note <text>', 'attach a note')
+  .action((opts: { title: string; note?: string }) => {
+    run(() => addProjectCmd(opts))
+  })
+
+add
+  .command('action')
+  .description('Create an action item')
+  .requiredOption('--title <text>', 'title')
+  .option('--active', 'next action')
+  .option('--deferred', 'someday/maybe')
   .option('--project <id>', 'parent project id')
-  .option('--due <date>', 'due date (YYYY-MM-DD or natural language); action only')
+  .option('--due <date>', 'due date (YYYY-MM-DD or natural language)')
   .option('--note <text>', 'attach a note')
   .action(
     (opts: {
       title: string
       active?: boolean
       deferred?: boolean
-      waiting?: boolean
       project?: string
       due?: string
       note?: string
     }) => {
-      run(() => addCmd(opts))
+      run(() => addActionCmd(opts))
     },
   )
 
+add
+  .command('waiting')
+  .description('Create a waiting item')
+  .requiredOption('--title <text>', 'title')
+  .option('--project <id>', 'parent project id')
+  .option('--note <text>', 'attach a note')
+  .action((opts: { title: string; project?: string; note?: string }) => {
+    run(() => addWaitingCmd(opts))
+  })
+
 program
   .command('edit <id>')
-  .description('Edit an item (title, note, due, project)')
+  .description('Edit any entity (project, action, or waiting)')
   .option('--title <text>', 'new title')
   .option('--note <text>', "note text; '' clears")
   .option('--due <date>', "due date; '' clears (action only)")
-  .option('--project <id>', "parent project id; '' detaches")
+  .option('--project <id>', "parent project id; '' detaches (item only)")
   .action(
     (
       id: string,
@@ -88,50 +106,30 @@ program
     },
   )
 
-const projects = program.command('projects').description('Manage projects')
-
-projects
-  .command('add')
-  .description('Create a new project')
-  .requiredOption('--title <text>', 'project title')
-  .option('--note <text>', 'attach a note')
-  .action((opts: { title: string; note?: string }) => {
-    run(() => addProjectCmd(opts))
-  })
-
-projects
-  .command('edit <id>')
-  .description('Edit a project (title, note)')
-  .option('--title <text>', 'new title')
-  .option('--note <text>', "note text; '' clears")
-  .action((id: string, opts: { title?: string; note?: string }) => {
-    run(() => editProjectCmd(id, opts))
-  })
-
 program
   .command('activate <id>')
-  .description('Set active=true on an action or project; clears terminal state')
+  .description('status=active; clears closed_at')
   .action((id: string) => {
     run(() => activateCmd(id))
   })
 
 program
   .command('defer <id>')
-  .description('Set active=false on an action or project; clears terminal state')
+  .description('status=deferred; clears closed_at')
   .action((id: string) => {
     run(() => deferCmd(id))
   })
 
 program
   .command('complete <id>')
-  .description('Mark an entity completed')
+  .description('status=completed; closed_at=now')
   .action((id: string) => {
     run(() => completeCmd(id))
   })
 
 program
   .command('drop <id>')
-  .description('Mark an entity dropped')
+  .description('status=dropped; closed_at=now')
   .action((id: string) => {
     run(() => dropCmd(id))
   })
