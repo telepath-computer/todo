@@ -17,20 +17,23 @@ File shape:
 
 ```json
 {
+  "tags": ["errand", "home", "waiting", "calls", "computer"],
   "projects": {
     "tel":    { "title": "Telepath", "note": null, "active": true, "completed": null, "dropped": null },
     "chores": { "title": "Chores",   "note": null, "active": true, "completed": null, "dropped": null }
   },
   "tasks": [
     { "id": 7, "project": "tel", "title": "Find guests", "available": true,
-      "category": "errand", "due": "2026-05-01", "note": null,
+      "tags": ["errand"], "due": "2026-05-01", "note": null,
       "created": "2026-04-27T10:14:32Z", "completed": null, "dropped": null },
     { "id": 42, "project": null, "title": "Pick up dry cleaning", "available": true,
-      "category": null, "due": null, "note": null,
+      "tags": ["errand"], "due": null, "note": null,
       "created": "2026-04-27T10:15:00Z", "completed": null, "dropped": null }
   ]
 }
 ```
+
+The top-level `tags` array is the **registry** — a controlled vocabulary. Tasks may only use tags from this list; unknown tags are rejected. New tags require explicit `todo tags add <tag>` (deliberate act, prevents slop). The store ships pre-populated with `["errand", "home", "waiting", "calls", "computer"]` as a sensible GTD-flavored starting set.
 
 Pretty-printed (2-space indent, sorted keys) for clean diffs.
 
@@ -50,7 +53,7 @@ type Task = {
   project: string | null       // slug; null for standalone tasks
   title: string                // required
   available: boolean           // true = next action; false = someday
-  category: string | null      // single string, free-form (slug-formatted), nullable
+  tags: string[]               // each tag must be in the registry; empty array if untagged
   due: string | null           // YYYY-MM-DD
   note: string | null
   created: string              // ISO timestamp, auto-set on insert
@@ -77,7 +80,7 @@ type Task = {
 | `lane: waiting` | `category: "waiting"` | waiting is just a category value |
 | `lane: completed` | `completed: <iso>` set | derived from timestamp |
 | `done` | (removed) | derived from `completed != null` |
-| `contexts: string[]` | `category: string \| null` | **single value** instead of array; lossy if existing data has multiple contexts |
+| `contexts: string[]` | `tags: string[]` | renamed; multi-value preserved; values must be in registry |
 | `completedAt` | `completed` | rename |
 | (new) | `id` | stable ID |
 | (new) | `created` | ISO timestamp |
@@ -102,7 +105,7 @@ A project surfaces in `todo ls` if `project.active && project.completed === null
 todo ls                                # everything actionable: tasks + projects, mixed dashboard
 todo ls --tasks                        # tasks only
 todo ls --projects                     # projects only (with sections: Active / Inactive)
-todo ls --category <cat>               # filter tasks by category
+todo ls --tag <tag>                    # filter tasks by tag
 todo ls --project <slug>               # tasks in one project
 todo show <ref>                        # polymorphic — show a task or a project
                                        #   <slug>      → project drill-down (all its tasks regardless of state)
@@ -113,12 +116,16 @@ todo show <ref>                        # polymorphic — show a task or a projec
 ### Task mutations (top-level — most common)
 
 ```
-todo add "<title>" [--project <slug>] [--category <cat>] [--due <date>] [--note <text>]
-todo edit <ref>    [--title ...] [--project ...] [--category ...] [--due ...] [--note ...] [--available true|false]
+todo add "<title>" [--project <slug>] [--tag <tag>]... [--due <date>] [--note <text>] [--available true|false]
+todo edit <ref>    [--title ...] [--project ...] [--tag <tag>]... [--due ...] [--note ...] [--available true|false]
 todo complete <ref>                    # sets completed=now, clears dropped
 todo drop <ref>                        # sets dropped=now, clears completed
 todo reopen <ref>                      # clears completed and dropped
 ```
+
+`--available` defaults to `true` on `add`; pass `--available false` to file directly as someday.
+
+`--tag` is repeatable on `add` (initial set). On `edit`, repeated `--tag` flags **replace** the entire set; pass `--tag ""` once to clear.
 
 ### Project mutations (namespaced)
 
@@ -130,13 +137,23 @@ todo projects drop <slug>
 todo projects reopen <slug>
 ```
 
+### Tag registry (controlled vocabulary)
+
+```
+todo tags ls                           # list registered tags
+todo tags add <tag>                    # explicitly register a new tag
+todo tags remove <tag>                 # errors if any item still uses it
+```
+
+Adding a task with an unregistered tag is an error. The agent must either pick from existing tags or run `todo tags add <tag>` first — keeps the vocabulary curated and prevents slop (e.g. `imp` vs `important`).
+
 ### Defaults
 
 - `todo add` without `--project` creates a standalone task (project=null)
-- New tasks: `available: true`, `completed: null`, `dropped: null`
+- New tasks: `available: true`, `tags: []`, `completed: null`, `dropped: null`
 - New projects: `active: true`, `completed: null`, `dropped: null`
-- Categories are free-form for now (no registry)
-- Adding a task with `--project X` where X doesn't exist is an error (use `todo projects add X` first)
+- Tag registry ships pre-populated with `["errand", "home", "waiting", "calls", "computer"]`
+- Adding a task with `--project X` or `--tag X` where X isn't registered is an error (use `todo projects add X` / `todo tags add X` first)
 
 ## Display
 
@@ -144,12 +161,10 @@ TTY-colored output, picocolors, existing style preserved. Default `todo ls`:
 
 ```
 Tasks:
-  (uncategorized)
+  (untagged)
     [ ] Find guests [tel#7]
   @errand
     [ ] Buy mic [tel#3]
-  @stephen
-    [ ] Pricing strategy [tel#10]
   @waiting
     [ ] Cover art [tel#8]
 
@@ -157,6 +172,8 @@ Projects:
   ✳ Telepath [tel]
   ✳ Chores [chores]
 ```
+
+Tasks with multiple tags appear once, under their first alphabetical tag (same dedup logic as the existing `renderAvailableGrouped`). The full tag set is shown on the task line if rendered with `--verbose` or in `todo show`.
 
 `todo ls --projects` adds an Inactive section under Active.
 
