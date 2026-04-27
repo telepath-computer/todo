@@ -1,5 +1,5 @@
 import * as chrono from 'chrono-node'
-import { InvalidDate } from './errors.js'
+import { InvalidArgument, InvalidDate } from './errors.js'
 
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -23,4 +23,17 @@ export function resolveDueInput(input: string, reference: Date = new Date()): st
   const parsed = chrono.parseDate(normalize(raw), reference, { forwardDate: true })
   if (!parsed) throw new InvalidDate(input)
   return formatLocal(parsed)
+}
+
+export function todayLocal(reference: Date = new Date()): string {
+  return formatLocal(reference)
+}
+
+export function requireFutureDate(input: string, reference: Date = new Date()): string {
+  const resolved = resolveDueInput(input, reference)
+  const today = todayLocal(reference)
+  if (resolved <= today) {
+    throw new InvalidArgument('start date must be in the future')
+  }
+  return resolved
 }

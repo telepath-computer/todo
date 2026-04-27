@@ -48,6 +48,7 @@ JSON-only output.
       "id": "K3jLm9pQ",
       "note": null,
       "project": "Vh8XLm2k",
+      "start_at": null,
       "status": "active",
       "title": "Find guests",
       "type": "action"
@@ -91,6 +92,7 @@ type ActionItem = BaseItem & {
   type: 'action'
   status: Status
   due: string | null           // YYYY-MM-DD
+  start_at: string | null      // YYYY-MM-DD; only meaningful when status='deferred'
   closed_at: string | null
 }
 
@@ -113,6 +115,10 @@ type Store = { lists: List[]; items: Item[] }
 - `created_at` is set once on insert, never edited.
 - `id` is set once on insert, never reused, never edited.
 - Title is non-empty (whitespace-only rejected).
+- `ActionItem.start_at` is only non-null when `status === 'deferred'`. Mutators
+  that change status to anything else clear `start_at`.
+- `start_at` must be a strictly-future date (`> today` in host local TZ) at the
+  moment it's written.
 
 ### IDs
 
@@ -133,13 +139,17 @@ up across both `lists` and `items`.
 | `todo list --all` | also `{ deferred_actions, deferred_projects }` |
 | `todo show <id>` | the canonical entity |
 
-**Bucket filters:**
+**Bucket filters** (compared against host-local `YYYY-MM-DD`):
 
-- `active_actions`: `type=action && status=active && parent.status=active` (or no parent).
-- `deferred_actions`: `status=deferred && parent.status=active` (or no parent).
-- `waiting`: `type=waiting && status=active && parent.status=active` (or no parent).
+- `active_actions`: `type=action && parent.active && (status=active || (status=deferred && start_at != null && start_at <= today))`.
+- `deferred_actions`: `type=action && status=deferred && (start_at == null || start_at > today) && parent.active` — both open-ended (someday/maybe) and future-scheduled actions.
+- `waiting`: `type=waiting && status=active && parent.active`.
 - `active_projects`: `type=project && status=active`.
 - `deferred_projects`: `type=project && status=deferred`.
+
+Past-due scheduled items (`start_at <= today`) are auto-promoted into
+`active_actions` and excluded from `deferred_actions`. The stored status stays
+`deferred` — the dashboard view is the source of effective state.
 
 Children of a deferred or terminal project are hidden from `todo list`. Inspect
 them via `todo show <id>` directly. Terminal items are intentionally not
@@ -151,41 +161,81 @@ Verb-first: `todo add <type> --title "..." [type-specific flags]`.
 
 ```
 todo add project --title "<text>" [--note <text>]
-todo add action  --title "<text>" (--active | --deferred)
+todo add action  --title "<text>" (--active | --deferred | --start <date>)
                                   [--project <id>] [--due <date>] [--note <text>]
 todo add waiting --title "<text>" [--project <id>] [--note <text>]
 ```
 
 - `add project` creates a `ProjectList` at `status=active`.
-- `add action` requires exactly one of `--active` / `--deferred`. `--due`
-  accepts `YYYY-MM-DD` or natural language (`tomorrow`, `next friday`).
-- `add waiting` creates a `WaitingItem` at `status=active`. No `--due`.
+- `add action` requires at least one of `--active`, `--deferred`, or `--start
+  <date>`. `--start <date>` alone implies `--deferred`. `--active` and
+  `--deferred` are mutually exclusive; `--active --start ...` is rejected.
+- `--due` and `--start` accept `YYYY-MM-DD` or natural language (`tomorrow`,
+  `next friday`). `--start` must resolve to a strictly-future date; `""` is
+  rejected on `add` (use `edit` to clear later).
+- `add waiting` creates a `WaitingItem` at `status=active`. No `--due`, no `--start`.
 - `--project <id>` must reference an existing project.
 
 ### Edit (polymorphic on id)
 
+`todo edit` is the primitive mutation verb. It accepts status flags, the
+`--start` schedule flag, and the field flags in any combination.
+
 ```
-todo edit <id> [--title ...] [--note ...] [--due ...] [--project ...]
+todo edit <id> [--active | --deferred | --completed | --dropped]
+              [--start <date>]
+              [--title ...] [--note ...] [--due ...] [--project ...]
 ```
 
+Field semantics:
+
 - Omit a flag to leave the field unchanged.
-- Pass `""` to clear: `--note ""`, `--due ""`, `--project ""`.
+- Pass `""` to clear: `--note ""`, `--due ""`, `--project ""`, `--start ""`.
 - `--title ""` is rejected (title is required).
 - `--due` is rejected on projects and waiting items.
 - `--project` is rejected on projects.
+- `--start` is rejected on projects and waiting items.
+- `--start <future>` on an action with no explicit status flag implicitly
+  transitions `status` to `deferred`. On a terminal action it also clears
+  `closed_at` (the schedule overrides the closed state).
+- `--start ""` clears `start_at` without changing status.
 - Empty patch (no flags) → error: `nothing to edit`.
+
+Status semantics:
+
+- At most one of `--active|--deferred|--completed|--dropped` per call.
+- `--active --start ...`, `--completed --start ...`, `--dropped --start ...`
+  rejected (contradiction).
+- `--deferred --start <future>` is the explicit "schedule" call.
+- See the lifecycle effects table below for `closed_at` / `start_at` clearing.
 
 ### Lifecycle (polymorphic on id)
 
+Each lifecycle verb is a 1:1 alias for `todo edit <id> --<status>`. Same
+validation rules.
+
 ```
-todo activate <id>     # status=active,    closed_at=null
-todo defer <id>        # status=deferred,  closed_at=null
-todo complete <id>     # status=completed, closed_at=now
-todo drop <id>         # status=dropped,   closed_at=now
+todo activate <id>                   # ≡ edit <id> --active
+todo defer <id> [--start <date>]     # ≡ edit <id> --deferred [--start <date>]
+todo complete <id>                   # ≡ edit <id> --completed
+todo drop <id>                       # ≡ edit <id> --dropped
 ```
 
-- `activate` and `defer` reject waiting items (waiting has no `deferred`
+Lifecycle effects:
+
+| transition | status | closed_at | start_at |
+|---|---|---|---|
+| `--active` / `activate` | `active` | cleared | cleared |
+| `--deferred` (no `--start`) / `defer` | `deferred` | cleared | cleared |
+| `--deferred --start <d>` / `defer --start <d>` | `deferred` | cleared | `<d>` |
+| `--completed` / `complete` | `completed` | `now` | cleared |
+| `--dropped` / `drop` | `dropped` | `now` | cleared |
+
+Entity-type rules:
+
+- `--active` and `--deferred` reject waiting items (waiting has no `deferred`
   state and no resurrection path; terminal waiting items stay terminal).
+- `--start` rejects projects and waiting items.
 - `activate`/`defer` are also how you bring a completed/dropped action or
   project back to a live state — they clear `closed_at`. There is no
   `reopen` verb.
@@ -225,8 +275,16 @@ Plain text on stderr, prefixed with `todo:`, exit code 1.
 | `cannot activate waiting item <id> (...)` | `activate`/`defer` on a waiting item |
 | `data dir must be an absolute path (...)` | relative path in env or config |
 | `malformed store.json at ...` | file present but not parseable JSON |
-| `could not parse date: <input>` | unparseable `--due` |
+| `could not parse date: <input>` | unparseable `--due` or `--start` |
 | `title is required and cannot be empty` | empty title on add or edit |
+| `start date must be in the future` | `--start` resolves to today or past |
+| `--active, --deferred, or --start is required for actions` | `add action` with no mode flag |
+| `--start cannot combine with --active` | `add action --active --start ...` |
+| `--start requires --deferred` | `edit <id> --active --start ...` |
+| `--start is not allowed on projects` | `--start` against a project (defer/edit) |
+| `--start is not allowed on waiting items` | `--start` against a waiting item |
+| `--start is not allowed with --completed / --dropped` | terminal + schedule contradiction |
+| `--start cannot be empty on add` / `... on defer` | `--start ""` on `add action` or `defer` |
 
 ## Out of scope
 

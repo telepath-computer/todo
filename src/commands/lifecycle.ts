@@ -1,5 +1,7 @@
 import { resolveDataDir } from '../core/config.js'
-import { setStatus, type List, type Item } from '../core/model.js'
+import { requireFutureDate } from '../core/dates.js'
+import { InvalidArgument, NotFound } from '../core/errors.js'
+import { findEntity, setStatus, type Item, type List } from '../core/model.js'
 import { nowIso, readStore, writeStore } from '../core/store.js'
 import { json } from './shared.js'
 
@@ -11,17 +13,28 @@ function persist(fn: (dataDir: string) => { store: Parameters<typeof writeStore>
 }
 
 export function activateCmd(id: string): string {
-  return persist((dataDir) => setStatus(readStore(dataDir), id, 'active', null))
+  return persist((dataDir) => setStatus(readStore(dataDir), id, { status: 'active' }))
 }
 
-export function deferCmd(id: string): string {
-  return persist((dataDir) => setStatus(readStore(dataDir), id, 'deferred', null))
+export function deferCmd(id: string, opts: { start?: string } = {}): string {
+  return persist((dataDir) => {
+    const store = readStore(dataDir)
+    if (opts.start !== undefined) {
+      const e = findEntity(store, id)
+      if (!e) throw new NotFound(`not found: ${id}`)
+      if (e.type === 'project') throw new InvalidArgument('--start is not allowed on projects')
+      if (e.type === 'waiting') throw new InvalidArgument('--start is not allowed on waiting items')
+      if (opts.start === '') throw new InvalidArgument('--start cannot be empty on defer')
+    }
+    const start_at = opts.start === undefined ? null : requireFutureDate(opts.start)
+    return setStatus(store, id, { status: 'deferred', start_at })
+  })
 }
 
 export function completeCmd(id: string): string {
-  return persist((dataDir) => setStatus(readStore(dataDir), id, 'completed', nowIso()))
+  return persist((dataDir) => setStatus(readStore(dataDir), id, { status: 'completed', closed_at: nowIso() }))
 }
 
 export function dropCmd(id: string): string {
-  return persist((dataDir) => setStatus(readStore(dataDir), id, 'dropped', nowIso()))
+  return persist((dataDir) => setStatus(readStore(dataDir), id, { status: 'dropped', closed_at: nowIso() }))
 }

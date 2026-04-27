@@ -11,7 +11,7 @@ Implementation notes for the `todo` CLI. The user-facing surface is in
 - **IDs:** [`nanoid`](https://www.npmjs.com/package/nanoid) with custom 8-char
   alphanumeric alphabet.
 - **Date parsing:** [`chrono-node`](https://www.npmjs.com/package/chrono-node)
-  for natural-language `--due`.
+  for natural-language `--due` and `--start`.
 - **No UI framework, no colors.** Output is JSON only; pretty-printed with
   sorted keys via `JSON.stringify(value, sortedReplacer, 2)`.
 
@@ -43,13 +43,23 @@ src/
 - **`store.ts`** is the only module that touches the data file. Atomic
   tmpfile + rename + fsync. Reads return `EMPTY_STORE` if the file is missing.
   Catches `JSON.parse` and rethrows as `DoError("malformed store.json at …")`
-  so the CLI surfaces a clean message instead of a stack trace.
+  so the CLI surfaces a clean message instead of a stack trace. `readStore`
+  also normalises forward-compatibility fields — actions written by older
+  versions get any missing fields (e.g. `start_at`) defaulted to `null` on
+  read, so the rest of the code can treat the schema as strict.
 - **`model.ts`** is pure. No I/O, no `Date.now()`, no `process.env`. Mutators
   take the current `Store` and an input that includes any non-deterministic
-  values (`id`, `created_at`, `ts`); they return `{ store, entity }`. Validators
-  throw typed errors. Bucket helpers (`liveActions`, `deferredActions`,
-  `liveWaiting`, `activeProjects`, `deferredProjects`) implement filter rules
-  including parent-state cascade.
+  values (`id`, `created_at`, `ts`); they return `{ store, entity }`.
+  `setStatus` takes a discriminated `StatusTransition` so each branch carries
+  exactly the data it needs (`closed_at` for terminal, `start_at` for
+  deferred). Validators throw typed errors. Bucket helpers (`liveActions`,
+  `deferredActions`, `liveWaiting`, `activeProjects`, `deferredProjects`)
+  implement filter rules including parent-state cascade and the past-due-
+  scheduled bridge: a deferred action with `start_at <= today` shows up in
+  `liveActions` and is excluded from `deferredActions`.
+- **`dates.ts`** parses `--due`/`--start` inputs (chrono + ISO passthrough)
+  and exposes `todayLocal()` and `requireFutureDate()` for the strictly-future
+  invariant on `start_at`.
 - **`config.ts`** is the gate for data-dir paths. Both `writeConfig` and
   `resolveDataDir` reject non-absolute paths via a shared `requireAbsolute`
   check. `TODO_DATA_DIR=relative/foo` fails fast on resolve.

@@ -25,6 +25,7 @@ type Action = {
   created_at: string
   status: Status
   due: string | null
+  start_at: string | null
   closed_at: string | null
 }
 
@@ -47,6 +48,29 @@ type ListOutput = {
   waiting: Waiting[]
   deferred_actions?: Action[]
   deferred_projects?: Project[]
+}
+
+function ymd(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function futureDate(daysAhead = 30): string {
+  const d = new Date()
+  d.setDate(d.getDate() + daysAhead)
+  return ymd(d)
+}
+
+function pastDate(daysBack = 30): string {
+  const d = new Date()
+  d.setDate(d.getDate() - daysBack)
+  return ymd(d)
+}
+
+function todayStr(): string {
+  return ymd(new Date())
 }
 
 let dataDir: string
@@ -73,13 +97,21 @@ function addProject(title: string, opts: { note?: string } = {}): Project {
 
 function addAction(
   title: string,
-  flags: { active?: boolean; deferred?: boolean; project?: string; due?: string; note?: string } = {},
+  flags: {
+    active?: boolean
+    deferred?: boolean
+    project?: string
+    due?: string
+    start?: string
+    note?: string
+  } = {},
 ): Action {
   const args = ['add', 'action', '--title', title]
   if (flags.active) args.push('--active')
   if (flags.deferred) args.push('--deferred')
   if (flags.project) args.push('--project', flags.project)
   if (flags.due !== undefined) args.push('--due', flags.due)
+  if (flags.start !== undefined) args.push('--start', flags.start)
   if (flags.note !== undefined) args.push('--note', flags.note)
   const r = cli(...args)
   assert.equal(r.code, 0, r.stderr)
@@ -211,7 +243,7 @@ describe('todo add', () => {
   it('errors when neither --active nor --deferred is given on action', () => {
     const r = cli('add', 'action', '--title', 'X')
     assert.equal(r.code, 1)
-    assert.match(r.stderr, /--active or --deferred is required/i)
+    assert.match(r.stderr, /--active, --deferred, or --start is required/i)
   })
 
   it('errors when both --active and --deferred are given', () => {
@@ -471,5 +503,278 @@ describe('help', () => {
     // commander prints help to stderr on no args by default
     const out = (r.stdout + r.stderr).toLowerCase()
     assert.match(out, /usage: todo/)
+  })
+})
+
+// ---- Start dates ----------------------------------------------------
+
+describe('start dates', () => {
+  describe('add action --start', () => {
+    it('happy path: --deferred --start <future>', () => {
+      const a = addAction('Read DDIA', { deferred: true, start: futureDate(7) })
+      assert.equal(a.status, 'deferred')
+      assert.equal(a.start_at, futureDate(7))
+    })
+
+    it('rejects --active --start', () => {
+      const r = cli('add', 'action', '--title', 'X', '--active', '--start', futureDate(7))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start cannot combine with --active/i)
+    })
+
+    it('--start alone implies --deferred', () => {
+      const a = addAction('Implicit', { start: futureDate(7) })
+      assert.equal(a.status, 'deferred')
+      assert.equal(a.start_at, futureDate(7))
+    })
+
+    it('rejects no flags at all', () => {
+      const r = cli('add', 'action', '--title', 'X')
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--active, --deferred, or --start is required/i)
+    })
+
+    it('rejects --deferred --start today', () => {
+      const r = cli('add', 'action', '--title', 'X', '--deferred', '--start', todayStr())
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /start date must be in the future/i)
+    })
+
+    it('rejects --deferred --start <past>', () => {
+      const r = cli('add', 'action', '--title', 'X', '--deferred', '--start', pastDate(1))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /start date must be in the future/i)
+    })
+
+    it('rejects --deferred --start ""', () => {
+      const r = cli('add', 'action', '--title', 'X', '--deferred', '--start', '')
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start cannot be empty/i)
+    })
+
+    it('parses natural-language --start (tomorrow)', () => {
+      const a = addAction('NL', { deferred: true, start: 'tomorrow' })
+      assert.equal(a.status, 'deferred')
+      assert.match(a.start_at ?? '', /^\d{4}-\d{2}-\d{2}$/)
+    })
+  })
+
+  describe('defer <id> --start', () => {
+    it('schedules an action via defer --start <future>', () => {
+      const a = addAction('x', { active: true })
+      const out = parseJson<Action>(cli('defer', a.id, '--start', futureDate(14)).stdout)
+      assert.equal(out.status, 'deferred')
+      assert.equal(out.start_at, futureDate(14))
+      assert.equal(out.closed_at, null)
+    })
+
+    it('defer --start <future> matches edit --deferred --start <future>', () => {
+      const a1 = addAction('one', { active: true })
+      const a2 = addAction('two', { active: true })
+      const future = futureDate(7)
+      const v1 = parseJson<Action>(cli('defer', a1.id, '--start', future).stdout)
+      const v2 = parseJson<Action>(cli('edit', a2.id, '--deferred', '--start', future).stdout)
+      assert.equal(v1.status, v2.status)
+      assert.equal(v1.start_at, v2.start_at)
+      assert.equal(v1.closed_at, v2.closed_at)
+    })
+
+    it('defer (no --start) clears any prior start_at', () => {
+      const a = addAction('x', { deferred: true, start: futureDate(7) })
+      assert.equal(a.start_at, futureDate(7))
+      const out = parseJson<Action>(cli('defer', a.id).stdout)
+      assert.equal(out.status, 'deferred')
+      assert.equal(out.start_at, null)
+    })
+
+    it('rejects --start on a project (entity-type rule first)', () => {
+      const p = addProject('P')
+      const r = cli('defer', p.id, '--start', pastDate(7))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start is not allowed on projects/i)
+    })
+
+    it('rejects --start on waiting items', () => {
+      const w = addWaitingItem('w')
+      const r = cli('defer', w.id, '--start', futureDate(7))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start is not allowed on waiting items/i)
+    })
+
+    it('rejects --start ""', () => {
+      const a = addAction('x', { deferred: true })
+      const r = cli('defer', a.id, '--start', '')
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start cannot be empty/i)
+    })
+
+    it('rejects --start <past>', () => {
+      const a = addAction('x', { active: true })
+      const r = cli('defer', a.id, '--start', pastDate(1))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /start date must be in the future/i)
+    })
+  })
+
+  describe('edit <id> --start', () => {
+    it('--start <future> on active action flips status to deferred', () => {
+      const a = addAction('x', { active: true })
+      const out = parseJson<Action>(cli('edit', a.id, '--start', futureDate(7)).stdout)
+      assert.equal(out.status, 'deferred')
+      assert.equal(out.start_at, futureDate(7))
+    })
+
+    it('--start <future> on terminal action revives it (closed_at cleared)', () => {
+      const a = addAction('x', { active: true })
+      cli('complete', a.id)
+      const out = parseJson<Action>(cli('edit', a.id, '--start', futureDate(7)).stdout)
+      assert.equal(out.status, 'deferred')
+      assert.equal(out.start_at, futureDate(7))
+      assert.equal(out.closed_at, null)
+    })
+
+    it('--start "" clears start_at, leaves status alone', () => {
+      const a = addAction('x', { deferred: true, start: futureDate(7) })
+      const out = parseJson<Action>(cli('edit', a.id, '--start', '').stdout)
+      assert.equal(out.status, 'deferred')
+      assert.equal(out.start_at, null)
+    })
+
+    it('--active --start <date> rejected', () => {
+      const a = addAction('x', { active: true })
+      const r = cli('edit', a.id, '--active', '--start', futureDate(7))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start requires --deferred/i)
+    })
+
+    it('--completed --start <date> rejected', () => {
+      const a = addAction('x', { active: true })
+      const r = cli('edit', a.id, '--completed', '--start', futureDate(7))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start is not allowed with --completed \/ --dropped/i)
+    })
+
+    it('--dropped --start <date> rejected', () => {
+      const a = addAction('x', { active: true })
+      const r = cli('edit', a.id, '--dropped', '--start', futureDate(7))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start is not allowed with --completed \/ --dropped/i)
+    })
+
+    it('--start on project rejected (entity rule first)', () => {
+      const p = addProject('P')
+      const r = cli('edit', p.id, '--start', futureDate(7))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start is not allowed on projects/i)
+    })
+
+    it('--start on waiting item rejected', () => {
+      const w = addWaitingItem('w')
+      const r = cli('edit', w.id, '--start', futureDate(7))
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /--start is not allowed on waiting items/i)
+    })
+
+    it('two status flags rejected', () => {
+      const a = addAction('x', { active: true })
+      const r = cli('edit', a.id, '--active', '--deferred')
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /mutually exclusive/i)
+    })
+
+    it('--active activates a deferred action and clears start_at', () => {
+      const a = addAction('x', { deferred: true, start: futureDate(7) })
+      const out = parseJson<Action>(cli('edit', a.id, '--active').stdout)
+      assert.equal(out.status, 'active')
+      assert.equal(out.start_at, null)
+      assert.equal(out.closed_at, null)
+    })
+
+    it('--completed sets closed_at and clears start_at', () => {
+      const a = addAction('x', { deferred: true, start: futureDate(7) })
+      const out = parseJson<Action>(cli('edit', a.id, '--completed').stdout)
+      assert.equal(out.status, 'completed')
+      assert.equal(out.start_at, null)
+      assert.notEqual(out.closed_at, null)
+    })
+
+    it('combines field edits with status flag in a single call', () => {
+      const a = addAction('x', { active: true, due: '2026-05-01' })
+      const out = parseJson<Action>(
+        cli('edit', a.id, '--deferred', '--start', futureDate(14), '--title', 'Renamed').stdout,
+      )
+      assert.equal(out.title, 'Renamed')
+      assert.equal(out.status, 'deferred')
+      assert.equal(out.start_at, futureDate(14))
+      assert.equal(out.due, '2026-05-01')
+    })
+  })
+
+  describe('list with start dates', () => {
+    it('--all surfaces scheduled actions in deferred_actions', () => {
+      const a = addAction('Read DDIA', { deferred: true, start: futureDate(30) })
+      const out = parseJson<ListOutput>(cli('list', '--all').stdout)
+      assert.deepEqual(out.deferred_actions?.map((x) => x.id), [a.id])
+    })
+
+    it('open-ended deferred and scheduled both land in deferred_actions', () => {
+      const a1 = addAction('Someday', { deferred: true })
+      const a2 = addAction('Renew', { deferred: true, start: futureDate(30) })
+      const out = parseJson<ListOutput>(cli('list', '--all').stdout)
+      assert.deepEqual(
+        (out.deferred_actions ?? []).map((x) => x.id).sort(),
+        [a1.id, a2.id].sort(),
+      )
+    })
+
+    it('past-due scheduled item appears in active_actions, not deferred_actions', () => {
+      const proj = addProject('P')
+      const a = addAction('past', { deferred: true, project: proj.id, start: futureDate(7) })
+      // Hand-edit start_at to a past date directly in the store
+      const path = join(dataDir, 'store.json')
+      const raw = readJson<{ items: Action[]; lists: Project[] }>(path)
+      const idx = raw.items.findIndex((i) => i.id === a.id)
+      raw.items[idx].start_at = pastDate(1)
+      writeFileSync(path, JSON.stringify(raw))
+
+      const out = parseJson<ListOutput>(cli('list', '--all').stdout)
+      assert.deepEqual(out.active_actions.map((x) => x.id), [a.id])
+      assert.deepEqual(out.deferred_actions, [])
+    })
+
+    it('parent project deferred hides scheduled child from both buckets', () => {
+      const proj = addProject('P')
+      addAction('child', { deferred: true, project: proj.id, start: futureDate(14) })
+      cli('defer', proj.id)
+      const out = parseJson<ListOutput>(cli('list', '--all').stdout)
+      assert.deepEqual(out.active_actions, [])
+      assert.deepEqual(out.deferred_actions, [])
+    })
+  })
+
+  describe('schema compatibility', () => {
+    it('reads a v0.3-shaped action (no start_at) cleanly via list', () => {
+      mkdirSync(dataDir, { recursive: true })
+      const v03 = {
+        lists: [],
+        items: [
+          {
+            id: 'aabbccdd',
+            type: 'action',
+            title: 'Old action',
+            project: null,
+            note: null,
+            created_at: '2026-04-01T00:00:00Z',
+            status: 'active',
+            due: null,
+            closed_at: null,
+          },
+        ],
+      }
+      writeFileSync(join(dataDir, 'store.json'), JSON.stringify(v03))
+      const out = parseJson<ListOutput>(cli('list').stdout)
+      assert.equal(out.active_actions.length, 1)
+      assert.equal(out.active_actions[0].start_at, null)
+    })
   })
 })

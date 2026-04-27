@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { resolveDueInput } from '../src/core/dates.js'
-import { InvalidDate } from '../src/core/errors.js'
+import { requireFutureDate, resolveDueInput, todayLocal } from '../src/core/dates.js'
+import { InvalidArgument, InvalidDate } from '../src/core/errors.js'
 
 function ymd(d: Date): string {
   const y = d.getFullYear()
@@ -51,5 +51,40 @@ describe('dates.resolveDueInput', () => {
 
   it('throws InvalidDate for gibberish', () => {
     assert.throws(() => resolveDueInput('asdfghjkl'), InvalidDate)
+  })
+})
+
+describe('dates.todayLocal', () => {
+  it('returns YYYY-MM-DD', () => {
+    assert.match(todayLocal(), /^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('formats the reference date in local time', () => {
+    const ref = new Date(2026, 4, 15)
+    assert.equal(todayLocal(ref), '2026-05-15')
+  })
+})
+
+describe('dates.requireFutureDate', () => {
+  it('accepts a future date', () => {
+    const ref = new Date(2026, 4, 15)
+    assert.equal(requireFutureDate('2026-06-01', ref), '2026-06-01')
+    assert.equal(requireFutureDate('tomorrow', ref), '2026-05-16')
+  })
+
+  it('rejects today', () => {
+    const ref = new Date(2026, 4, 15)
+    assert.throws(() => requireFutureDate('today', ref), InvalidArgument)
+    assert.throws(() => requireFutureDate('2026-05-15', ref), InvalidArgument)
+  })
+
+  it('rejects past dates', () => {
+    const ref = new Date(2026, 4, 15)
+    assert.throws(() => requireFutureDate('2026-01-01', ref), InvalidArgument)
+    assert.throws(() => requireFutureDate('yesterday', ref), InvalidArgument)
+  })
+
+  it('rejects gibberish with InvalidDate (delegated)', () => {
+    assert.throws(() => requireFutureDate('asdfghjkl'), InvalidDate)
   })
 })

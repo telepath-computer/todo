@@ -32,6 +32,7 @@ export type ActionItem = BaseItem & {
   type: 'action'
   status: Status
   due: string | null
+  start_at: string | null      // YYYY-MM-DD; only meaningful when status='deferred'
   closed_at: string | null
 }
 
@@ -136,11 +137,13 @@ export type AddActionInput = {
   project?: string | null
   due?: string | null
   note?: string | null
+  start_at?: string | null
 }
 
 export function addAction(s: Store, input: AddActionInput): { store: Store; entity: ActionItem } {
   requireValidTitle(input.title)
   requireListExists(s, input.project)
+  const start_at = input.status === 'deferred' ? (input.start_at ?? null) : null
   const entity: ActionItem = {
     id: input.id,
     type: 'action',
@@ -150,6 +153,7 @@ export function addAction(s: Store, input: AddActionInput): { store: Store; enti
     created_at: input.created_at,
     status: input.status,
     due: input.due ?? null,
+    start_at,
     closed_at: null,
   }
   return { store: { ...s, items: [...s.items, entity] }, entity }
@@ -203,6 +207,7 @@ export type EditItemPatch = {
   note?: string | null
   due?: string | null
   project?: string | null
+  start_at?: string | null
 }
 
 export function editItem(s: Store, id: string, patch: EditItemPatch): { store: Store; entity: Item } {
@@ -212,12 +217,16 @@ export function editItem(s: Store, id: string, patch: EditItemPatch): { store: S
     patch.title === undefined &&
     patch.note === undefined &&
     patch.due === undefined &&
-    patch.project === undefined
+    patch.project === undefined &&
+    patch.start_at === undefined
   ) {
     throw new NothingToEdit('nothing to edit')
   }
   if (patch.due !== undefined && item.type === 'waiting') {
     throw new InvalidArgument('--due is not allowed on waiting items')
+  }
+  if (patch.start_at !== undefined && item.type === 'waiting') {
+    throw new InvalidArgument('--start is not allowed on waiting items')
   }
   if (patch.project !== undefined) requireListExists(s, patch.project)
 
@@ -227,6 +236,7 @@ export function editItem(s: Store, id: string, patch: EditItemPatch): { store: S
     if (patch.note !== undefined) next.note = patch.note
     if (patch.due !== undefined) next.due = patch.due
     if (patch.project !== undefined) next.project = patch.project
+    if (patch.start_at !== undefined) next.start_at = patch.start_at
     return { store: replaceItem(s, next), entity: next }
   }
   const next: WaitingItem = { ...item }
@@ -238,42 +248,46 @@ export function editItem(s: Store, id: string, patch: EditItemPatch): { store: S
 
 // Lifecycle ------------------------------------------------------------
 
+// Discriminated union: each status carries the data it needs.
+export type StatusTransition =
+  | { status: 'active' }
+  | { status: 'deferred'; start_at: string | null }
+  | { status: 'completed'; closed_at: string }
+  | { status: 'dropped'; closed_at: string }
+
 export function setStatus(
   s: Store,
   id: string,
-  status: Status,
-  ts: string | null,
+  t: StatusTransition,
 ): { store: Store; entity: List | Item } {
-  // Argument shape invariants — same for every entity type.
-  if (isTerminal(status) && ts === null) {
-    throw new InvalidArgument(`status "${status}" requires a timestamp`)
-  }
-  if (!isTerminal(status) && ts !== null) {
-    throw new InvalidArgument(`status "${status}" must not have a timestamp`)
-  }
-
   const e = requireEntity(s, id)
-  const closed_at = isTerminal(status) ? ts : null
+  const closed_at = t.status === 'completed' || t.status === 'dropped' ? t.closed_at : null
 
   if (e.type === 'waiting') {
-    if (!isTerminal(status)) {
+    if (!isTerminal(t.status)) {
       throw new InvalidArgument(
-        `cannot ${status === 'deferred' ? 'defer' : 'activate'} waiting item ${id} ` +
+        `cannot ${t.status === 'deferred' ? 'defer' : 'activate'} waiting item ${id} ` +
           `(waiting items only transition to completed/dropped)`,
       )
     }
-    const next: WaitingItem = { ...e, status, closed_at }
+    const next: WaitingItem = { ...e, status: t.status, closed_at }
     return { store: replaceItem(s, next), entity: next }
   }
   if (e.type === 'project') {
-    const next: ProjectList = { ...e, status, closed_at }
+    const next: ProjectList = { ...e, status: t.status, closed_at }
     return { store: replaceList(s, next), entity: next }
   }
-  const next: ActionItem = { ...e, status, closed_at }
+  // action
+  const start_at = t.status === 'deferred' ? t.start_at : null
+  const next: ActionItem = { ...e, status: t.status, closed_at, start_at }
   return { store: replaceItem(s, next), entity: next }
 }
 
 // Bucket helpers -------------------------------------------------------
+//
+// `today` is a YYYY-MM-DD string (host-local). Past-due scheduled items
+// (status='deferred', start_at <= today) are promoted into liveActions
+// automatically; deferredActions excludes them to avoid double-counting.
 
 function parentActive(s: Store, projectId: string | null): boolean {
   if (projectId === null) return true
@@ -282,15 +296,27 @@ function parentActive(s: Store, projectId: string | null): boolean {
   return parent.status === 'active'
 }
 
-export function liveActions(s: Store): ActionItem[] {
-  return s.items.filter(
-    (i): i is ActionItem => i.type === 'action' && i.status === 'active' && parentActive(s, i.project),
-  )
+function isAction(i: Item): i is ActionItem {
+  return i.type === 'action'
 }
 
-export function deferredActions(s: Store): ActionItem[] {
+export function liveActions(s: Store, today: string): ActionItem[] {
+  return s.items.filter((i): i is ActionItem => {
+    if (!isAction(i)) return false
+    if (!parentActive(s, i.project)) return false
+    if (i.status === 'active') return true
+    if (i.status === 'deferred' && i.start_at !== null && i.start_at <= today) return true
+    return false
+  })
+}
+
+export function deferredActions(s: Store, today: string): ActionItem[] {
   return s.items.filter(
-    (i): i is ActionItem => i.type === 'action' && i.status === 'deferred' && parentActive(s, i.project),
+    (i): i is ActionItem =>
+      isAction(i) &&
+      i.status === 'deferred' &&
+      (i.start_at === null || i.start_at > today) &&
+      parentActive(s, i.project),
   )
 }
 

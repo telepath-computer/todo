@@ -2,7 +2,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'node:path'
 import { customAlphabet } from 'nanoid'
 import { DoError } from './errors.js'
-import type { Store } from './model.js'
+import type { ActionItem, Item, Store } from './model.js'
 import { EMPTY_STORE } from './model.js'
 
 const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -24,11 +24,27 @@ export function readStore(dataDir: string): Store {
   const path = storePath(dataDir)
   if (!existsSync(path)) return EMPTY_STORE
   const raw = readFileSync(path, 'utf8')
+  let parsed: Store
   try {
-    return JSON.parse(raw) as Store
+    parsed = JSON.parse(raw) as Store
   } catch (err) {
     throw new DoError(`malformed store.json at ${path}: ${(err as Error).message}`)
   }
+  return normalizeStore(parsed)
+}
+
+// Forward-compat normalisation: stores written by older versions may be
+// missing fields introduced later. Fill defaults so the rest of the code
+// can treat the schema as strict.
+function normalizeStore(s: Store): Store {
+  const items = s.items.map((i): Item => {
+    if (i.type === 'action') {
+      const raw = i as ActionItem & { start_at?: string | null }
+      if (raw.start_at === undefined) return { ...raw, start_at: null }
+    }
+    return i
+  })
+  return { ...s, items }
 }
 
 export function writeStore(dataDir: string, store: Store): void {

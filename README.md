@@ -12,7 +12,9 @@ Three things go in your todo, in GTD shorthand:
   moves on.
 - **Actions** — concrete things to do. The kind you can pick up and finish:
   "email Steve", "buy headphones". They're either *active* (a next action,
-  ready to do) or *deferred* (someday/maybe — not now, not gone).
+  ready to do) or *deferred* (someday/maybe — not now, not gone). A deferred
+  action can carry an optional **start date** to schedule it: it stays out of
+  the way until that day, then auto-shows on the dashboard.
 - **Waiting** — things blocking on someone else: "cover art from designer",
   "tax refund". You don't act on these; you watch them.
 
@@ -55,10 +57,14 @@ $ todo add action --title "Find guests for E14" --active --project Vh8XLm2k --du
   "id": "K3jLm9pQ",
   "note": null,
   "project": "Vh8XLm2k",
+  "start_at": null,
   "status": "active",
   "title": "Find guests for E14",
   "type": "action"
 }
+
+$ todo add action --title "Renew domain" --deferred --start "next monday"
+# scheduled — hidden from the dashboard until that day, then auto-shows
 
 $ todo add waiting --title "Cover art from designer" --project Vh8XLm2k
 

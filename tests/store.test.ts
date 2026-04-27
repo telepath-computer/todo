@@ -87,9 +87,8 @@ describe('readStore / writeStore', () => {
             title: 'X',
             note: null,
             created_at: '2026-04-27T10:00:00Z',
-            active: true,
-            completed: null,
-            dropped: null,
+            status: 'active',
+            closed_at: null,
           },
         ],
         items: [],
@@ -134,11 +133,44 @@ describe('readStore / writeStore', () => {
     const dir = makeTempDataDir()
     try {
       mkdirSync(dir, { recursive: true })
-      const raw = `{"lists":[{"id":"P1","type":"project","title":"Hi","note":null,"created_at":"${nowIso()}","active":true,"completed":null,"dropped":null}],"items":[]}`
+      const raw = `{"lists":[{"id":"P1","type":"project","title":"Hi","note":null,"created_at":"${nowIso()}","status":"active","closed_at":null}],"items":[]}`
       writeFileSync(join(dir, 'store.json'), raw)
       const back = readStore(dir)
       assert.equal(back.lists.length, 1)
       assert.equal(back.lists[0].id, 'P1')
+    } finally {
+      cleanup(dir)
+    }
+  })
+
+  it('normalizes a v0.3 action (no start_at) to start_at: null on read', () => {
+    const dir = makeTempDataDir()
+    try {
+      mkdirSync(dir, { recursive: true })
+      const raw = JSON.stringify({
+        lists: [],
+        items: [
+          {
+            id: 'A1',
+            type: 'action',
+            title: 'Old',
+            project: null,
+            note: null,
+            created_at: nowIso(),
+            status: 'active',
+            due: null,
+            closed_at: null,
+          },
+        ],
+      })
+      writeFileSync(join(dir, 'store.json'), raw)
+      const back = readStore(dir)
+      assert.equal(back.items.length, 1)
+      const action = back.items[0]
+      assert.equal(action.type, 'action')
+      assert.equal('start_at' in action, true)
+      // @ts-expect-error narrow
+      assert.equal(action.start_at, null)
     } finally {
       cleanup(dir)
     }

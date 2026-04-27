@@ -65,6 +65,7 @@ add
   .option('--deferred', 'someday/maybe')
   .option('--project <id>', 'parent project id')
   .option('--due <date>', 'due date (YYYY-MM-DD or natural language)')
+  .option('--start <date>', 'start date — schedule action to auto-revive (implies --deferred if no mode flag)')
   .option('--note <text>', 'attach a note')
   .action(
     (opts: {
@@ -73,6 +74,7 @@ add
       deferred?: boolean
       project?: string
       due?: string
+      start?: string
       note?: string
     }) => {
       run(() => addActionCmd(opts))
@@ -92,6 +94,11 @@ add
 program
   .command('edit <id>')
   .description('Edit any entity (project, action, or waiting)')
+  .option('--active', 'set status=active')
+  .option('--deferred', 'set status=deferred')
+  .option('--completed', 'set status=completed')
+  .option('--dropped', 'set status=dropped')
+  .option('--start <date>', "start date (action only); '' clears; with future date implies --deferred")
   .option('--title <text>', 'new title')
   .option('--note <text>', "note text; '' clears")
   .option('--due <date>', "due date; '' clears (action only)")
@@ -99,7 +106,17 @@ program
   .action(
     (
       id: string,
-      opts: { title?: string; note?: string; due?: string; project?: string },
+      opts: {
+        active?: boolean
+        deferred?: boolean
+        completed?: boolean
+        dropped?: boolean
+        start?: string
+        title?: string
+        note?: string
+        due?: string
+        project?: string
+      },
     ) => {
       run(() => editCmd(id, opts))
     },
@@ -114,9 +131,10 @@ program
 
 program
   .command('defer <id>')
-  .description('status=deferred; clears closed_at')
-  .action((id: string) => {
-    run(() => deferCmd(id))
+  .description('status=deferred; clears closed_at; --start schedules an action to revive on a future date')
+  .option('--start <date>', 'future date — schedule the action to auto-revive (action only)')
+  .action((id: string, opts: { start?: string }) => {
+    run(() => deferCmd(id, opts))
   })
 
 program

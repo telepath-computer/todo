@@ -26,6 +26,9 @@ import {
 } from '../src/core/model.js'
 
 const T0 = '2026-04-27T10:00:00Z'
+const TODAY = '2026-04-27'
+const FUTURE = '2026-09-01'
+const PAST = '2026-01-01'
 
 function seed(): Store {
   let s: Store = EMPTY_STORE
@@ -88,6 +91,7 @@ describe('addAction', () => {
     assert.equal(entity.project, 'P1')
     assert.equal(entity.status, 'active')
     assert.equal(entity.due, '2026-05-01')
+    assert.equal(entity.start_at, null)
     assert.equal(entity.closed_at, null)
   })
 
@@ -100,6 +104,31 @@ describe('addAction', () => {
     })
     assert.equal(entity.project, null)
     assert.equal(entity.status, 'deferred')
+    assert.equal(entity.start_at, null)
+  })
+
+  it('creates a deferred action with start_at', () => {
+    const { entity } = addAction(EMPTY_STORE, {
+      id: 'A1',
+      created_at: T0,
+      title: 'Schedule',
+      status: 'deferred',
+      start_at: FUTURE,
+    })
+    assert.equal(entity.status, 'deferred')
+    assert.equal(entity.start_at, FUTURE)
+  })
+
+  it('ignores start_at when status=active', () => {
+    const { entity } = addAction(EMPTY_STORE, {
+      id: 'A1',
+      created_at: T0,
+      title: 'Active',
+      status: 'active',
+      start_at: FUTURE,
+    })
+    assert.equal(entity.status, 'active')
+    assert.equal(entity.start_at, null)
   })
 
   it('rejects unknown parent project', () => {
@@ -189,6 +218,17 @@ describe('editItem', () => {
     assert.throws(() => editItem(seed(), 'W1', { due: '2026-05-01' }), InvalidArgument)
   })
 
+  it('rejects start_at on waiting items', () => {
+    assert.throws(() => editItem(seed(), 'W1', { start_at: FUTURE }), InvalidArgument)
+  })
+
+  it('clears start_at on actions with null', () => {
+    let s = seed()
+    s = setStatus(s, 'A2', { status: 'deferred', start_at: FUTURE }).store
+    const { entity } = editItem(s, 'A2', { start_at: null })
+    assert.equal((entity as ActionItem).start_at, null)
+  })
+
   it('clears due on actions with null', () => {
     let s = seed()
     s = editItem(s, 'A1', { due: '2026-05-01' }).store
@@ -206,57 +246,76 @@ describe('editItem', () => {
 })
 
 describe('setStatus', () => {
-  it('activates a completed action and clears closed', () => {
+  it('activates a completed action and clears closed_at and start_at', () => {
     let s = seed()
-    s = setStatus(s, 'A2', 'completed', T0).store
-    const { entity } = setStatus(s, 'A2', 'active', null)
+    s = setStatus(s, 'A2', { status: 'deferred', start_at: FUTURE }).store
+    s = setStatus(s, 'A2', { status: 'completed', closed_at: T0 }).store
+    const { entity } = setStatus(s, 'A2', { status: 'active' })
     assert.equal((entity as ActionItem).status, 'active')
     assert.equal((entity as ActionItem).closed_at, null)
+    assert.equal((entity as ActionItem).start_at, null)
+  })
+
+  it('defers an action with start_at', () => {
+    const { entity } = setStatus(seed(), 'A1', { status: 'deferred', start_at: FUTURE })
+    assert.equal((entity as ActionItem).status, 'deferred')
+    assert.equal((entity as ActionItem).start_at, FUTURE)
+    assert.equal((entity as ActionItem).closed_at, null)
+  })
+
+  it('defers an action without start_at clears any prior start_at', () => {
+    let s = seed()
+    s = setStatus(s, 'A1', { status: 'deferred', start_at: FUTURE }).store
+    const { entity } = setStatus(s, 'A1', { status: 'deferred', start_at: null })
+    assert.equal((entity as ActionItem).start_at, null)
+    assert.equal((entity as ActionItem).status, 'deferred')
+  })
+
+  it('completing an action clears start_at', () => {
+    let s = seed()
+    s = setStatus(s, 'A1', { status: 'deferred', start_at: FUTURE }).store
+    const { entity } = setStatus(s, 'A1', { status: 'completed', closed_at: T0 })
+    assert.equal((entity as ActionItem).status, 'completed')
+    assert.equal((entity as ActionItem).start_at, null)
+    assert.equal((entity as ActionItem).closed_at, T0)
   })
 
   it('defers a project that was dropped', () => {
     let s = seed()
-    s = setStatus(s, 'P1', 'dropped', T0).store
-    const { entity } = setStatus(s, 'P1', 'deferred', null)
+    s = setStatus(s, 'P1', { status: 'dropped', closed_at: T0 }).store
+    const { entity } = setStatus(s, 'P1', { status: 'deferred', start_at: null })
     assert.equal((entity as ProjectList).status, 'deferred')
     assert.equal((entity as ProjectList).closed_at, null)
   })
 
   it('rejects activate and defer on waiting items', () => {
-    assert.throws(() => setStatus(seed(), 'W1', 'active', null), InvalidArgument)
-    assert.throws(() => setStatus(seed(), 'W1', 'deferred', null), InvalidArgument)
+    assert.throws(() => setStatus(seed(), 'W1', { status: 'active' }), InvalidArgument)
+    assert.throws(
+      () => setStatus(seed(), 'W1', { status: 'deferred', start_at: null }),
+      InvalidArgument,
+    )
   })
 
   it('completes a waiting item', () => {
-    const { entity } = setStatus(seed(), 'W1', 'completed', T0)
+    const { entity } = setStatus(seed(), 'W1', { status: 'completed', closed_at: T0 })
     assert.equal((entity as WaitingItem).status, 'completed')
     assert.equal((entity as WaitingItem).closed_at, T0)
   })
 
   it('drops a project', () => {
-    const { entity } = setStatus(seed(), 'P1', 'dropped', T0)
+    const { entity } = setStatus(seed(), 'P1', { status: 'dropped', closed_at: T0 })
     assert.equal((entity as ProjectList).status, 'dropped')
     assert.equal((entity as ProjectList).closed_at, T0)
   })
 
-  it('rejects active/deferred with a timestamp', () => {
-    assert.throws(() => setStatus(seed(), 'A1', 'active', T0), InvalidArgument)
-    assert.throws(() => setStatus(seed(), 'A1', 'deferred', T0), InvalidArgument)
-  })
-
-  it('rejects completed/dropped without a timestamp', () => {
-    assert.throws(() => setStatus(seed(), 'A1', 'completed', null), InvalidArgument)
-    assert.throws(() => setStatus(seed(), 'A1', 'dropped', null), InvalidArgument)
-  })
-
   it('completed and dropped are mutually exclusive (closed reflects last write)', () => {
     let s = seed()
-    s = setStatus(s, 'A1', 'completed', T0).store
+    s = setStatus(s, 'A1', { status: 'completed', closed_at: T0 }).store
     let entity = findItem(s, 'A1') as ActionItem
     assert.equal(entity.status, 'completed')
     assert.equal(entity.closed_at, T0)
 
-    s = setStatus(s, 'A1', 'dropped', '2026-04-28T00:00:00Z').store
+    s = setStatus(s, 'A1', { status: 'dropped', closed_at: '2026-04-28T00:00:00Z' }).store
     entity = findItem(s, 'A1') as ActionItem
     assert.equal(entity.status, 'dropped')
     assert.equal(entity.closed_at, '2026-04-28T00:00:00Z')
@@ -266,14 +325,35 @@ describe('setStatus', () => {
 describe('bucket helpers', () => {
   it('liveActions filters by status=active and parent active', () => {
     const s = seed()
-    const ids = liveActions(s).map((a) => a.id).sort()
+    const ids = liveActions(s, TODAY).map((a) => a.id).sort()
     assert.deepEqual(ids, ['A1', 'A3'])
   })
 
-  it('deferredActions filters by status=deferred and parent active', () => {
+  it('deferredActions includes open-ended (start_at=null) deferred actions', () => {
     const s = seed()
-    const ids = deferredActions(s).map((a) => a.id)
+    const ids = deferredActions(s, TODAY).map((a) => a.id)
     assert.deepEqual(ids, ['A2'])
+  })
+
+  it('deferredActions includes future-start (scheduled) actions', () => {
+    let s = seed()
+    s = setStatus(s, 'A2', { status: 'deferred', start_at: FUTURE }).store
+    assert.deepEqual(deferredActions(s, TODAY).map((a) => a.id), ['A2'])
+  })
+
+  it('past-due scheduled action is promoted into liveActions and excluded from deferredActions', () => {
+    let s = seed()
+    s = setStatus(s, 'A2', { status: 'deferred', start_at: PAST }).store
+    const liveIds = liveActions(s, TODAY).map((a) => a.id).sort()
+    assert.deepEqual(liveIds, ['A1', 'A2', 'A3'])
+    assert.deepEqual(deferredActions(s, TODAY), [])
+  })
+
+  it('start_at equal to today counts as past-due (promoted into liveActions)', () => {
+    let s = seed()
+    s = setStatus(s, 'A2', { status: 'deferred', start_at: TODAY }).store
+    assert.deepEqual(liveActions(s, TODAY).map((a) => a.id).sort(), ['A1', 'A2', 'A3'])
+    assert.deepEqual(deferredActions(s, TODAY), [])
   })
 
   it('liveWaiting filters waiting items only', () => {
@@ -281,37 +361,38 @@ describe('bucket helpers', () => {
     assert.deepEqual(ids, ['W1'])
   })
 
-  it('hides children of a deferred parent project from liveActions', () => {
+  it('hides children of a deferred parent project from liveActions and deferredActions', () => {
     let s = seed()
-    s = setStatus(s, 'P1', 'deferred', null).store
-    const ids = liveActions(s).map((a) => a.id)
-    assert.deepEqual(ids, ['A3'])
+    s = setStatus(s, 'A2', { status: 'deferred', start_at: FUTURE }).store
+    s = setStatus(s, 'P1', { status: 'deferred', start_at: null }).store
+    assert.deepEqual(liveActions(s, TODAY).map((a) => a.id), ['A3'])
+    assert.deepEqual(deferredActions(s, TODAY), [])
   })
 
   it('hides children of a deferred parent project from liveWaiting', () => {
     let s = seed()
-    s = setStatus(s, 'P1', 'deferred', null).store
+    s = setStatus(s, 'P1', { status: 'deferred', start_at: null }).store
     assert.deepEqual(liveWaiting(s), [])
   })
 
   it('hides children of a completed parent project too', () => {
     let s = seed()
-    s = setStatus(s, 'P1', 'completed', T0).store
-    const ids = liveActions(s).map((a) => a.id)
+    s = setStatus(s, 'P1', { status: 'completed', closed_at: T0 }).store
+    const ids = liveActions(s, TODAY).map((a) => a.id)
     assert.deepEqual(ids, ['A3'])
   })
 
   it('excludes terminal items from active buckets', () => {
     let s = seed()
-    s = setStatus(s, 'A1', 'completed', T0).store
-    const ids = liveActions(s).map((a) => a.id)
+    s = setStatus(s, 'A1', { status: 'completed', closed_at: T0 }).store
+    const ids = liveActions(s, TODAY).map((a) => a.id)
     assert.deepEqual(ids, ['A3'])
   })
 
   it('activeProjects/deferredProjects exclude terminal projects', () => {
     let s = seed()
-    s = setStatus(s, 'P2', 'deferred', null).store
-    s = setStatus(s, 'P1', 'completed', T0).store
+    s = setStatus(s, 'P2', { status: 'deferred', start_at: null }).store
+    s = setStatus(s, 'P1', { status: 'completed', closed_at: T0 }).store
     const active = activeProjects(s).map((p) => p.id)
     const def = deferredProjects(s).map((p) => p.id)
     assert.deepEqual(active, [])
@@ -333,7 +414,7 @@ describe('immutability', () => {
   it('setStatus returns a new items array', () => {
     let s = seed()
     const beforeItems = s.items
-    s = setStatus(s, 'A1', 'completed', T0).store
+    s = setStatus(s, 'A1', { status: 'completed', closed_at: T0 }).store
     assert.notEqual(s.items, beforeItems)
   })
 })

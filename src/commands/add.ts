@@ -1,5 +1,5 @@
 import { resolveDataDir } from '../core/config.js'
-import { resolveDueInput } from '../core/dates.js'
+import { requireFutureDate, resolveDueInput } from '../core/dates.js'
 import { InvalidArgument } from '../core/errors.js'
 import { addAction, addProject, addWaiting } from '../core/model.js'
 import { newId, nowIso, readStore, writeStore } from '../core/store.js'
@@ -24,18 +24,24 @@ export function addActionCmd(opts: {
   deferred?: boolean
   project?: string
   due?: string
+  start?: string
   note?: string
 }): string {
   const modes = [opts.active, opts.deferred].filter(Boolean).length
-  if (modes === 0) {
-    throw new InvalidArgument('--active or --deferred is required for actions')
-  }
   if (modes > 1) {
     throw new InvalidArgument('--active and --deferred are mutually exclusive')
+  }
+  if (modes === 0 && opts.start === undefined) {
+    throw new InvalidArgument('--active, --deferred, or --start is required for actions')
+  }
+  if (opts.start !== undefined) {
+    if (opts.active) throw new InvalidArgument('--start cannot combine with --active')
+    if (opts.start === '') throw new InvalidArgument('--start cannot be empty on add')
   }
   const { dataDir } = resolveDataDir()
   const store = readStore(dataDir)
   const due = opts.due !== undefined ? resolveDueInput(opts.due) : null
+  const start_at = opts.start !== undefined ? requireFutureDate(opts.start) : null
   const { store: next, entity } = addAction(store, {
     id: newId(),
     created_at: nowIso(),
@@ -43,6 +49,7 @@ export function addActionCmd(opts: {
     status: opts.active ? 'active' : 'deferred',
     project: opts.project ?? null,
     due,
+    start_at,
     note: opts.note ?? null,
   })
   writeStore(dataDir, next)
