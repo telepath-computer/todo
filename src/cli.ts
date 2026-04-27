@@ -33,7 +33,6 @@ program
 
 program
   .command('list')
-  .alias('ls')
   .description('Active actions, waiting items, and active projects')
   .option('--all', 'also include deferred actions and deferred projects')
   .action((opts: { all?: boolean }) => {

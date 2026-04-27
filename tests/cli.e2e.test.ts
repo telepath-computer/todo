@@ -156,11 +156,6 @@ describe('todo list', () => {
     assert.deepEqual(out.active_actions, [])
   })
 
-  it('"ls" alias works', () => {
-    const r = cli('ls')
-    assert.equal(r.code, 0)
-    parseJson<ListOutput>(r.stdout) // doesn't throw
-  })
 })
 
 describe('todo show <id>', () => {
