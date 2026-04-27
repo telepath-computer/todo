@@ -49,8 +49,9 @@ program
   })
 
 program
-  .command('add <title>')
+  .command('add')
   .description('Add an action or waiting item')
+  .requiredOption('--title <text>', 'title')
   .option('--active', 'create an active action (next action)')
   .option('--deferred', 'create a deferred action (someday/maybe)')
   .option('--waiting', 'create a waiting item')
@@ -58,28 +59,16 @@ program
   .option('--due <date>', 'due date (YYYY-MM-DD or natural language); action only')
   .option('--note <text>', 'attach a note')
   .action(
-    (
-      title: string,
-      opts: {
-        active?: boolean
-        deferred?: boolean
-        waiting?: boolean
-        project?: string
-        due?: string
-        note?: string
-      },
-    ) => {
-      run(() =>
-        addCmd({
-          title,
-          active: opts.active,
-          deferred: opts.deferred,
-          waiting: opts.waiting,
-          project: opts.project,
-          due: opts.due,
-          note: opts.note,
-        }),
-      )
+    (opts: {
+      title: string
+      active?: boolean
+      deferred?: boolean
+      waiting?: boolean
+      project?: string
+      due?: string
+      note?: string
+    }) => {
+      run(() => addCmd(opts))
     },
   )
 
@@ -102,11 +91,12 @@ program
 const projects = program.command('projects').description('Manage projects')
 
 projects
-  .command('add <title>')
+  .command('add')
   .description('Create a new project')
+  .requiredOption('--title <text>', 'project title')
   .option('--note <text>', 'attach a note')
-  .action((title: string, opts: { note?: string }) => {
-    run(() => addProjectCmd({ title, note: opts.note }))
+  .action((opts: { title: string; note?: string }) => {
+    run(() => addProjectCmd(opts))
   })
 
 projects
