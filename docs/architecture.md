@@ -12,29 +12,31 @@ Implementation notes for the `todo` CLI. The user-facing surface is in
   alphanumeric alphabet.
 - **Date parsing:** [`chrono-node`](https://www.npmjs.com/package/chrono-node)
   for natural-language `--due`, `--start`, and `--date`.
-- **No UI framework, no colors.** Output is JSON only; pretty-printed with
-  sorted keys via `JSON.stringify(value, sortedReplacer, 2)`.
+- **No UI framework, no colors.** Output is markdown narrative for read
+  commands (rendered by `core/render.ts`); mutation responses are
+  pretty-printed sorted-key JSON via `JSON.stringify(value, sortedReplacer, 2)`.
 
 ## Architecture
-
-Three layers, no view layer (storage shape == display shape):
 
 ```
 src/
 ├── cli.ts                 commander wiring
-├── commands/              thin glue: parse args → call model → persist → JSON.stringify
+├── commands/              thin glue: parse args → call core → render → write/print
 │   ├── add.ts             addProjectCmd / addActionCmd / addWaitingCmd / addDeadlineCmd
 │   ├── config.ts          set-data-dir / config
+│   ├── dashboard.ts       bare `todo` — calls renderDashboard + renderHints
 │   ├── edit.ts            polymorphic on entity (project / action / waiting / deadline)
 │   ├── lifecycle.ts       activate / defer / complete / drop
-│   ├── list.ts            todo list (with --all)
+│   ├── list.ts            `todo list <type>` flat enumeration
 │   ├── shared.ts          json() helper
-│   └── show.ts
+│   └── show.ts            single-entity narrative (projects embed children + Hints)
 └── core/
     ├── config.ts          ~/.todo/config.json + dataDir resolution (env > config > default)
     ├── dates.ts           --due / --date parser (chrono-node), todayLocal, requireFutureDate
     ├── errors.ts          DoError, NotFound, NothingToEdit, InvalidArgument, InvalidDate
+    ├── hints.ts           Hint trigger functions (lapsed deadlines, stalled projects, stale waiting, deferred count) + renderHints composer
     ├── model.ts           types, mutators, bucket helpers, resolveRef, lookups
+    ├── render.ts          narrative formatting: dayDelta, modifiers, item lines, project lines, dashboard, list, show
     └── store.ts           store.json I/O, atomic write, nanoid, sorted-key stringify
 ```
 

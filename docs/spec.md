@@ -1,7 +1,9 @@
 # todo — spec
 
 JSON-storage CLI for GTD-style projects, actions, waiting items, and deadlines.
-Agent-first; JSON-only output.
+Agent-first: read commands return narrative markdown by default (with
+structured Hints surfacing what the dashboard hides); mutation commands
+return canonical entity JSON.
 
 ## Storage
 
@@ -141,33 +143,60 @@ up across both `lists` and `items`.
 
 ## CLI surface
 
-13 commands. JSON-only output. Errors are plain text on stderr with non-zero exit.
+Read commands return markdown narrative by default — designed for an
+LLM agent (or human) reading the output, not for `jq` piping. Mutation
+commands still return canonical entity JSON. Errors are plain text on
+stderr with non-zero exit.
 
 ### Reads
 
 | Command | Returns |
 |---|---|
-| `todo list` | `{ active_actions, active_projects, deadlines, waiting }` |
-| `todo list --all` | also `{ deferred_actions, deferred_projects }` |
-| `todo show <id>` | the canonical entity (for projects, also embeds `active_actions`, `deferred_actions`, `waiting`, `deadlines` scoped to the project — regardless of the project's own status) |
+| `todo` (bare, no subcommand) | The dashboard: live items + a `# Hints` section if any trigger fires. |
+| `todo list <type>` | Flat enumeration of every item of that type (any status, including completed/dropped/past-date). `<type>` ∈ `actions`, `projects`, `deadlines`, `waiting`. |
+| `todo show <id>` | One entity, with key fields. Projects also embed `## Active actions`, `## Deferred actions`, `## Waiting`, `## Deadlines` scoped to the project (regardless of the project's own status). |
 
-**Bucket filters** (compared against host-local `YYYY-MM-DD`):
+**Dashboard buckets** (compared against host-local `YYYY-MM-DD`):
 
-- `active_actions`: `type=action && parent.active && (status=active || (status=deferred && start_at != null && start_at <= today))`.
-- `deferred_actions`: `type=action && status=deferred && (start_at == null || start_at > today) && parent.active` — both open-ended (someday/maybe) and future-scheduled actions.
-- `waiting`: `type=waiting && status=active && parent.active`.
-- `deadlines`: `type=deadline && status=active && date >= today && parent.active`.
-- `active_projects`: `type=project && status=active`.
-- `deferred_projects`: `type=project && status=deferred`.
+- **Active actions**: `type=action && parent.active && (status=active || (status=deferred && start_at != null && start_at <= today))`.
+- **Waiting**: `type=waiting && status=active && parent.active`.
+- **Deadlines**: `type=deadline && status=active && date >= today && parent.active`.
+- **Active projects**: `type=project && status=active`.
 
-Past-due scheduled items (`start_at <= today`) are auto-promoted into
-`active_actions` and excluded from `deferred_actions`. The stored status stays
-`deferred` — the dashboard view is the source of effective state.
+Past-due scheduled actions auto-promote into the Active actions bucket;
+the stored status stays `deferred`. Children of a deferred or terminal
+project are hidden from the dashboard. Terminal items, dropped deadlines,
+and past-date deadlines are not on the dashboard — reach them via
+`todo list <type>` (which shows everything regardless of status).
 
-Children of a deferred or terminal project are hidden from `todo list`. Inspect
-them via `todo show <id>` directly. Terminal items, dropped deadlines, and
-past-date deadlines are intentionally not surfaced in any list view; query by
-id.
+**Hints** (`# Hints` section appended to dashboard output and the project
+case of `show`). See [hints.md](./hints.md) for the catalog. v1 surfaces:
+
+1. Recent lapsed deadlines (date passed within last 7 days, still active).
+2. Stalled active projects (no active actions, has at least one item).
+3. Stale waiting items (created >7 days ago, still active).
+4. Long-tail deferred count (informational; only when >0).
+
+Section is omitted entirely when no triggers fire.
+
+**Item line format** (used by dashboard, list, project sub-buckets):
+
+```
+- (<id>) <title> — <modifier1>, <modifier2>, …
+```
+
+Modifiers, in canonical order, when applicable:
+- `due <date> (<rel>)` — actions only. `<rel>`: `today`, `tomorrow`, `in N days`, `overdue N days`.
+- `start <date> (<rel>)` — actions with a `start_at`.
+- `date <date> (<rel>)` — deadlines.
+- `project <Title> (<id>)` — items with a parent project.
+- `waiting <N> days` — waiting items.
+- `status <s>` — only in `list <type>` output (status not implied by bucket).
+- `closed <ts>` — only in `list <type>` output, for terminal items.
+- `note: "<truncated to ~150 chars>"` — when present.
+
+For projects in `Active projects`: `<N> action(s), <M> waiting, <K> deadline(s)`
+counts modifier (zero counts skipped).
 
 ### Create
 
@@ -274,12 +303,19 @@ todo config                      # prints { dataDir, source }
 
 ## Output
 
-Every read, mutation, and lifecycle response is a single canonical entity (or a
-bucket-of-entities object for the list views). Storage shape and display shape
-are identical — what's on disk is what's emitted on stdout. The only "view"
-logic is bucketing and filtering for the list views.
+Read commands (`todo`, `todo list <type>`, `todo show <id>`) emit markdown
+narrative — `# Heading (count)` sections, `- (id) title — modifiers` lines,
+optional `# Hints` (or `## Hints` inside a project show) section. Designed
+to be read by an LLM agent (or human) without a parser. Item ids are
+8-char nanoids in `(parens)`, stable and grep-friendly.
 
-Pretty-printed (2-space indent, sorted keys), trailing newline.
+Mutation commands (`todo add`, `todo edit`, lifecycle verbs, `set-data-dir`,
+`config`) return the canonical entity as pretty-printed sorted-key JSON
+with a trailing newline — the agent just performed an action and wants
+the resulting record back.
+
+Storage shape (`store.json`) is unchanged JSON: same on-disk schema, same
+mutation-response shape. The format flip is purely on the read commands.
 
 ## Errors
 

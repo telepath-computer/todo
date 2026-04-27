@@ -1,7 +1,9 @@
 # @telepath-computer/todo
 
-A GTD-style task and project CLI with JSON storage. Designed for LLM agents:
-JSON-only output, stable refs, predictable shapes. Humans can read it too.
+A GTD-style task and project CLI. Designed for LLM agents: read commands
+return narrative markdown by default (with structured Hints surfacing what
+the dashboard hides); mutation commands return canonical entity JSON.
+Humans can read it too. Stable nanoid refs throughout.
 
 ## What it does
 
@@ -27,10 +29,12 @@ Tasks (actions, projects) finish one of two ways: **completed** (done) or
 between active and deferred too. Deadlines only `drop` (and `activate`
 un-drops); the date passing is what retires them.
 
-The dashboard view (`todo list`) shows what's *live*: the active actions you
-could do now, what you're waiting on, upcoming deadlines, and which projects
-are in motion. `--all` adds the deferred stuff. Terminal items, dropped
-deadlines, and past-date deadlines stay out of the way.
+The dashboard (`todo` with no subcommand) shows what's *live*: active
+actions, waiting items, upcoming deadlines, active projects — plus a
+`# Hints` section flagging stuff the dashboard would otherwise hide
+(recent lapsed deadlines, stalled projects, stale waiting, deferred
+queue size). Terminal items, dropped deadlines, and past-date deadlines
+stay out of the way; reach them with `todo list <type>`.
 
 ## Install
 

@@ -14,6 +14,7 @@ import {
   deferCmd,
   dropCmd,
 } from './commands/lifecycle.js'
+import { dashboardCmd } from './commands/dashboard.js'
 import { listCmd } from './commands/list.js'
 import { showCmd } from './commands/show.js'
 import { DoError } from './core/errors.js'
@@ -33,15 +34,23 @@ function run(fn: () => string): void {
 
 const program = new Command('todo')
 program
-  .description('GTD-style task and project CLI with JSON storage. Agent-first.')
+  .description(
+    'GTD-style task and project CLI with JSON storage. Agent-first. ' +
+      'Run with no command to see the dashboard (active items + Hints).',
+  )
   .helpOption('-h, --help', 'show help')
+  .action(() => {
+    run(() => dashboardCmd())
+  })
 
 program
-  .command('list')
-  .description('Active actions, waiting items, and active projects')
-  .option('--all', 'also include deferred actions and deferred projects')
-  .action((opts: { all?: boolean }) => {
-    run(() => listCmd({ all: opts.all }))
+  .command('list <type>')
+  .description(
+    'List every item of a given type, regardless of status ' +
+      '(actions, projects, deadlines, waiting). Includes completed/dropped/past-date.',
+  )
+  .action((type: string) => {
+    run(() => listCmd(type))
   })
 
 program

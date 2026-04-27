@@ -1,7 +1,7 @@
 {
   "name": "@telepath-computer/todo",
-  "version": "0.5.0",
-  "description": "GTD-style task and project CLI with JSON storage. Agent-first: discriminated entity types, stable nanoid refs, JSON-only output.",
+  "version": "0.6.0",
+  "description": "GTD-style task and project CLI. Agent-first: narrative markdown reads with structured Hints, canonical entity JSON for mutations, stable nanoid refs.",
   "type": "module",
   "bin": {
     "todo": "./dist/cli.js"
@@ -10,6 +10,8 @@
     "dist",
     "docs/spec.md",
     "docs/architecture.md",
+    "docs/hints.md",
+    "docs/agent-guide.md",
     "README.md"
   ],
   "keywords": [
