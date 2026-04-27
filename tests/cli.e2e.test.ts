@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { cleanup, makeTempDataDir, makeTempDir, parseJson, readJson, runCli } from './helpers.js'
@@ -263,6 +263,17 @@ describe('todo add', () => {
     const store = readJson<{ items: Action[] }>(path)
     assert.equal(store.items.length, 1)
   })
+
+  it('resolves natural-language --due via chrono', () => {
+    const a = addAction('Tomorrow task', { active: true, due: 'tomorrow' })
+    assert.match(a.due ?? '', /^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('rejects unparseable --due', () => {
+    const r = cli('add', 'X', '--active', '--due', 'asdfghjkl')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /could not parse date/i)
+  })
 })
 
 // ---- Edit -----------------------------------------------------------
@@ -416,6 +427,57 @@ describe('config / set-data-dir', () => {
       cleanup(home)
       cleanup(target)
     }
+  })
+
+  it('rejects relative paths in set-data-dir', () => {
+    const home = makeTempDir('todo-home-')
+    try {
+      const r = runCli(['set-data-dir', 'relative/path'], { home, env: { TODO_DATA_DIR: undefined } })
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /absolute path/i)
+    } finally {
+      cleanup(home)
+    }
+  })
+
+  it('rejects relative TODO_DATA_DIR with a clean error', () => {
+    const home = makeTempDir('todo-home-')
+    try {
+      const r = runCli(['list'], { home, env: { TODO_DATA_DIR: 'rel/data' } })
+      assert.equal(r.code, 1)
+      assert.match(r.stderr, /absolute path/i)
+    } finally {
+      cleanup(home)
+    }
+  })
+})
+
+describe('first run', () => {
+  it('list returns empty buckets without ever needing the data dir on disk', () => {
+    const home = makeTempDir('todo-home-')
+    const dir = join(makeTempDir('todo-data-parent-'), 'never-existed')
+    try {
+      const r = runCli(['list'], { home, env: { TODO_DATA_DIR: dir } })
+      assert.equal(r.code, 0, r.stderr)
+      const out = parseJson<{ active_actions: unknown[] }>(r.stdout)
+      assert.deepEqual(out, { active_actions: [], active_projects: [], waiting: [] })
+      // Reading shouldn't have created the dir.
+      assert.equal(existsSync(dir), false)
+    } finally {
+      cleanup(home)
+    }
+  })
+})
+
+describe('malformed store.json', () => {
+  it('surfaces a clean DoError, not a stack trace', () => {
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(join(dataDir, 'store.json'), '{ this is not json')
+    const r = cli('list')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /malformed store\.json/i)
+    // No stack trace line (e.g. "    at ")
+    assert.doesNotMatch(r.stderr, /^\s+at /m)
   })
 })
 

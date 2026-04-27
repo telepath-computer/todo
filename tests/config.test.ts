@@ -10,6 +10,7 @@ import {
   resolveDataDir,
   writeConfig,
 } from '../src/core/config.js'
+import { InvalidArgument } from '../src/core/errors.js'
 import { cleanup, makeTempDir } from './helpers.js'
 
 function withSandboxedHome<T>(fn: (home: string) => T): T {
@@ -103,6 +104,28 @@ describe('resolveDataDir', () => {
   it('configPath is under HOME/.todo/config.json', () => {
     withSandboxedHome((home) => {
       assert.equal(configPath(), join(home, '.todo', 'config.json'))
+    })
+  })
+
+  it('rejects relative paths in writeConfig', () => {
+    withSandboxedHome(() => {
+      assert.throws(
+        () => writeConfig({ dataDir: 'rel/path' }),
+        InvalidArgument,
+      )
+    })
+  })
+
+  it('rejects relative paths from env at resolve time', () => {
+    withSandboxedHome(() => {
+      const prev = process.env[ENV_VAR]
+      process.env[ENV_VAR] = 'relative/data'
+      try {
+        assert.throws(() => resolveDataDir(), InvalidArgument)
+      } finally {
+        if (prev === undefined) delete process.env[ENV_VAR]
+        else process.env[ENV_VAR] = prev
+      }
     })
   })
 })

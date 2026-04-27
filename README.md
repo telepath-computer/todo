@@ -1,6 +1,8 @@
 # @telepath-computer/todo
 
-A GTD-style task and project CLI over structured markdown files. Each project is one `.md` file; tasks live in `## Available` / `## Waiting` / `## Deferred` sections; completed work archives under `## Completed`. The format is hand-editable in any markdown editor (Obsidian-friendly), and the CLI mutates files in place — designed so LLM agents can list, add, and complete tasks reliably without grepping freeform notes.
+A GTD-style task and project CLI with JSON storage. Designed for LLM agents:
+discriminated entity types, stable nanoid refs, JSON-only output. Humans can
+read it too.
 
 ## Install
 
@@ -8,70 +10,144 @@ A GTD-style task and project CLI over structured markdown files. Each project is
 npm install -g @telepath-computer/todo
 ```
 
-## Quick start
+The binary is `todo`.
 
-```sh
-# Point todo at a folder of project files
-todo set-vault ~/notes/todo
+## Concepts
 
-# Create a project, add tasks, mark them done
-todo projects add podcast --title "The Podcast" --notes "A weekly show."
-todo tasks add --title "Write release notes" --project podcast --due 2026-05-01
-todo tasks add --title "Pick up milk" --project podcast --context errand
-todo tasks add --title "Reply from Sam" --project podcast --waiting
+Three entity types, all stored together in one JSON file:
 
-# See what's on your plate (cross-project)
-todo list
+| Type | When to use | Lifecycle |
+|---|---|---|
+| **project** | A multi-action outcome you're engaged with (or paused on). | active ↔ deferred → completed / dropped |
+| **action** | A concrete next action you can do. | active (next) ↔ deferred (someday/maybe) → completed / dropped |
+| **waiting** | Something you're waiting on someone else for. | live → completed / dropped (no resurrection) |
 
-# Mark something done — moves to ## Completed
-todo tasks complete podcast#1
+Every entity gets a stable 8-char nanoid (e.g. `Vh8XLm2k`). IDs never shift on
+mutation and are never reused. Every command that takes `<id>` accepts any
+entity id; the CLI looks up across projects and items.
+
+## Storage
+
+```
+~/.todo/
+├── config.json        # CLI config (data-dir override)
+└── data/
+    └── store.json     # all data
 ```
 
-## What gets stored
+The data directory resolves in this order:
 
-```markdown
----
-title: "The Podcast"
----
+1. `TODO_DATA_DIR` environment variable
+2. `dataDir` in `~/.todo/config.json` (set via `todo set-data-dir`)
+3. Default `~/.todo/data/`
 
-A weekly show.
+Paths must be absolute. Relative paths are rejected with a clear error.
 
-## Available
+`store.json` is pretty-printed with sorted keys, atomic-written via tmpfile +
+rename — safe to commit, sync via Dropbox/iCloud, or hand-edit.
 
-- [ ] Pick up milk @errand
-- [ ] Write release notes !2026-05-01
+## CLI
 
-## Waiting
+13 commands, JSON-only output. Errors go to stderr with non-zero exit.
 
-- [ ] Reply from Sam
+### Reads
 
-## Completed
-
-2026-05-01:
-
-- [x] Set up RSS feed
+```
+todo list                 # { active_actions, waiting, active_projects }
+todo list --all           # also { deferred_actions, deferred_projects }
+todo projects list        # { active_projects, deferred_projects }
+todo show <id>            # full canonical entity
 ```
 
-The format is hand-editable; `todo` mutates these files in place.
+### Item creation
 
-## Commands
+```
+todo add "<title>" --active   [--project <id>] [--due <date>] [--note <text>]
+todo add "<title>" --deferred [--project <id>] [--due <date>] [--note <text>]
+todo add "<title>" --waiting  [--project <id>] [--note <text>]
+```
 
-- `todo list [--all]` — cross-project dashboard.
-- `todo projects list | add | show | edit | remove` — project-level operations.
-- `todo tasks list [--available|--waiting|--deferred|--all] [--project <slug>]` — list tasks (default = Available + Waiting).
-- `todo tasks add | edit | show | complete | uncomplete | remove` — task operations.
-  - Lane flags: `--available` / `--waiting` / `--deferred` (mutually exclusive; default `--available`).
-  - `--context <name>` (repeatable, full-replace on `edit`).
-  - `--due <date>` accepts `YYYY-MM-DD` or natural language (`tomorrow`, `next friday`).
-- `todo set-vault <path>` — point the CLI at a vault.
+Exactly one of `--active`, `--deferred`, `--waiting` is required.
+`--due` accepts `YYYY-MM-DD` or natural language (`tomorrow`, `next friday`).
 
-Full spec: [docs/spec.md](./docs/spec.md).
+### Item edit
 
-## Refs
+```
+todo edit <id> [--title ...] [--note ...] [--due ...] [--project ...]
+```
 
-Tasks have stable refs of the form `<slug>#<index>` (e.g. `podcast#3`). Refs are 1-based positions across the three lane sections in document order, generated on every read. Mutations may shift refs — when this happens the CLI prints a one-line shift note so you (or your agent) know to re-list before the next mutation.
+Pass `""` to clear an optional field: `--note ""`, `--due ""`, `--project ""`.
+`--due` is rejected on waiting items.
 
-Note: `#` is a comment character in bash/zsh, so quote refs interactively (`'podcast#3'`). Agents calling via argv arrays don't need to.
+### Project creation / edit
+
+```
+todo projects add --title "<text>" [--note <text>]
+todo projects edit <id> [--title ...] [--note ...]
+```
+
+### Lifecycle (polymorphic on id)
+
+```
+todo activate <id>        # active=true; clears completed/dropped
+todo defer <id>           # active=false; clears completed/dropped
+todo complete <id>        # completed=now, dropped=null
+todo drop <id>            # dropped=now, completed=null
+```
+
+`activate`/`defer` reject waiting items (no `active` flag). To bring a
+completed/dropped action or project back to a live state, use `activate` or
+`defer` — both clear the terminal fields. There is no `reopen` verb.
+
+### Configuration
+
+```
+todo set-data-dir <abs-path>     # writes ~/.todo/config.json
+todo config                      # prints { dataDir, source }
+```
+
+## Example
+
+```
+$ todo projects add --title "Telepath" --note "Indie tool"
+{
+  "active": true,
+  "completed": null,
+  "created": "2026-04-27T11:10:00Z",
+  "dropped": null,
+  "id": "Vh8XLm2k",
+  "note": "Indie tool",
+  "title": "Telepath",
+  "type": "project"
+}
+
+$ todo add "Find guests" --active --project Vh8XLm2k --due tomorrow
+{
+  "active": true,
+  "completed": null,
+  "created": "2026-04-27T11:11:00Z",
+  "due": "2026-04-28",
+  "dropped": null,
+  "id": "K3jLm9pQ",
+  "list": "Vh8XLm2k",
+  "note": null,
+  "title": "Find guests",
+  "type": "action"
+}
+
+$ todo list
+{
+  "active_actions": [ ... ],
+  "active_projects": [ ... ],
+  "waiting": []
+}
+```
+
+## Docs
+
+- [docs/spec.md](docs/spec.md) — entity schema, storage layout, CLI surface, semantics.
+- [docs/cli.md](docs/cli.md) — implementation notes (architecture, modules).
+- [skill/SKILL.md](skill/SKILL.md) — agent-facing usage guide.
 
 ## License
 

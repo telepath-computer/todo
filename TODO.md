@@ -1,33 +1,44 @@
 # TODO
 
-Prioritised backlog for `td`. Rough buckets; within each, earlier items land first.
+Backlog for `todo`. Rough buckets; within each, earlier items land first.
 
-## Decide first
+## P1 — quality of life
 
-- **Rename `projects` → `lists`?** `project` implies a goal-oriented container with an end state. `list` generalises to "TV shows to watch", "books to read", "places to visit", plus current use. Cheap to change now (no meaningful data); expensive later. Either commit to `projects` and live with the naming, or swap before any P1 ships.
+- **Sort / group output.** `todo list` returns insertion order. Add ordering to
+  `active_actions` (overdue first, then due-today, then soonest, then undated;
+  break ties by `created` asc) and groupings (e.g. by parent project).
+- **`activate`/`defer` no-ops are silent.** Currently they always write the
+  store and return the entity. Skip the write if state is unchanged so diffs
+  stay clean.
+- **`--list-id` filter on `todo list`.** Show only items belonging to a
+  specific project. Useful when an agent is drilling in.
 
-## P1 — unblock daily use
+## P2 — schema extensions
 
-- **Sort / group tasks.** `td tasks list` currently prints in vault order (slug asc, then index). Add:
-  - `--sort due` — overdue first, then today, then soonest; undated last
-  - `--group-by project` (current default, made explicit)
-  - Once both work, make "due-aware sort, grouped by project" the default and the implicit options explicit for agents
-- **Deferred task state.** Third state beyond open/done — "not actionable right now" (blocked, waiting, someday/maybe). Hidden from default list; surfaced with `--include-deferred` or `--only-deferred`. Storage: likely `[~]` checkbox variant (some Obsidian plugins already recognise it). Needs a verb: probably `td tasks defer <ref>` and have `td tasks edit <ref>` handle state transitions.
-- **Project notes (CLI).** `## Notes` sections already round-trip through mutations. Add `td projects notes <slug>` to print; `--append "..."` to add a line. No format change needed — just surfaces what's already there for agents.
+- **Agenda items.** `type: "agenda"` with `with: string` (person to discuss).
+  Fits the discriminated-subtype model — new flag on `todo add`, new bucket
+  in list views.
+- **Situational tags / contexts.** Either a generic `tags: string[]` or a
+  typed `where: 'home' | 'computer' | 'errand' | ...`. Open question: free-form
+  vs. controlled vocabulary.
+- **Multiple list subtypes.** Watchlist, reading list, etc. The `BaseList` /
+  `ProjectList` split is already shaped for this.
 
-## P2 — quality of life
+## P3 — operational
 
-- **Archive projects.** Mark a project as archived (done or dormant, worth keeping for ref stability and history). Frontmatter `archived: true`. Hidden from default `projects list` and `tasks list`; surfaced with `--archived` or `--all`. Verbs: `td projects archive <slug>` / `td projects unarchive <slug>`.
-- **Star projects (today shortlist).** Pin projects currently in focus. Frontmatter `starred: true`; verbs `td projects star/unstar <slug>`. `td projects list --starred` and `td tasks list --starred` for quick focused view. (An alternative — a dedicated `today` slug — is less flexible.)
-
-## P3 — later
-
-- **Task notes.** Multi-line notes attached to a single task. Requires relaxing the `## Tasks` rule (currently: checkbox lines only). Likely form: indented sub-lines under a task; parser learns to associate them. Only worth it if task-level richness is a real gap in practice.
-- **Slug rename.** `td projects rename <old> <new>` — renames file, rewrites refs. Needs its own shift-note story (every ref to that project moves).
+- **Trash / restore.** Real delete (vs. drop) is currently impossible. Add
+  `todo trash <id>` that excises from `store.json` and `todo trashed list` if
+  ever needed.
+- **`--json` / `--ndjson` output mode.** Currently always pretty JSON.
+  Compact / streaming forms could matter at scale.
+- **Schema-version field at the top of `store.json`.** Future migrations have
+  somewhere to look.
+- **Read-only mode.** `TODO_READONLY=1` for sandboxed inspection.
 
 ## Open questions
 
-- Three states or more? Deferred covers most; `cancelled` is nice for history but distinct from `done`.
-- Does `starred` belong on tasks too, not just projects?
-- When archived/deferred items are included via `--all`, where do they sort — end of list, or mixed in by urgency?
-- If we rename to `lists`, what replaces "task"? Keep `task`, or go fully generic (`item`)?
+- Should `--due` accept time-of-day, or stay date-only?
+- Where do `tags`/`where` go on `todo list` — a separate `by_tag` bucket, or
+  baked into existing buckets via filter flags?
+- Should multiple parent projects per item be possible? (Currently single
+  `list` ref.) Probably no — but worth considering before tags land.

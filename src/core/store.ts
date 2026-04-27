@@ -1,6 +1,7 @@
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { customAlphabet } from 'nanoid'
+import { DoError } from './errors.js'
 import type { Store } from './model.js'
 import { EMPTY_STORE } from './model.js'
 
@@ -23,7 +24,11 @@ export function readStore(dataDir: string): Store {
   const path = storePath(dataDir)
   if (!existsSync(path)) return EMPTY_STORE
   const raw = readFileSync(path, 'utf8')
-  return JSON.parse(raw) as Store
+  try {
+    return JSON.parse(raw) as Store
+  } catch (err) {
+    throw new DoError(`malformed store.json at ${path}: ${(err as Error).message}`)
+  }
 }
 
 export function writeStore(dataDir: string, store: Store): void {

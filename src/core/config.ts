@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
+import { InvalidArgument } from './errors.js'
 import { stableStringify } from './store.js'
 
 export type Config = {
@@ -30,7 +31,16 @@ export function readConfig(): Config {
   return { dataDir: typeof parsed.dataDir === 'string' ? parsed.dataDir : null }
 }
 
+function requireAbsolute(path: string, source: string): void {
+  if (!isAbsolute(path)) {
+    throw new InvalidArgument(
+      `data dir must be an absolute path (${source}: ${JSON.stringify(path)})`,
+    )
+  }
+}
+
 export function writeConfig(c: Config): void {
+  if (c.dataDir !== null) requireAbsolute(c.dataDir, 'config')
   const path = configPath()
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, stableStringify(c) + '\n')
@@ -38,8 +48,14 @@ export function writeConfig(c: Config): void {
 
 export function resolveDataDir(): ResolvedConfig {
   const fromEnv = process.env[ENV_VAR]
-  if (fromEnv && fromEnv.length > 0) return { dataDir: fromEnv, source: 'env' }
+  if (fromEnv && fromEnv.length > 0) {
+    requireAbsolute(fromEnv, 'env TODO_DATA_DIR')
+    return { dataDir: fromEnv, source: 'env' }
+  }
   const cfg = readConfig()
-  if (cfg.dataDir) return { dataDir: cfg.dataDir, source: 'config' }
+  if (cfg.dataDir) {
+    requireAbsolute(cfg.dataDir, 'config')
+    return { dataDir: cfg.dataDir, source: 'config' }
+  }
   return { dataDir: defaultDataDir(), source: 'default' }
 }

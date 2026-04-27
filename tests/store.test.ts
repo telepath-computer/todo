@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
+import { DoError } from '../src/core/errors.js'
 import { addProject, type Store } from '../src/core/model.js'
 import { newId, nowIso, readStore, stableStringify, writeStore } from '../src/core/store.js'
 import { cleanup, makeTempDataDir } from './helpers.js'
@@ -138,6 +139,20 @@ describe('readStore / writeStore', () => {
       const back = readStore(dir)
       assert.equal(back.lists.length, 1)
       assert.equal(back.lists[0].id, 'P1')
+    } finally {
+      cleanup(dir)
+    }
+  })
+
+  it('throws DoError with a clean message on malformed JSON', () => {
+    const dir = makeTempDataDir()
+    try {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'store.json'), '{ this is not json')
+      assert.throws(
+        () => readStore(dir),
+        (err: unknown) => err instanceof DoError && /malformed store\.json/.test((err as Error).message),
+      )
     } finally {
       cleanup(dir)
     }
