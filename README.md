@@ -1,8 +1,28 @@
 # @telepath-computer/todo
 
 A GTD-style task and project CLI with JSON storage. Designed for LLM agents:
-JSON-only output, stable nanoid refs, discriminated entity types. Humans can
-read it too.
+JSON-only output, stable refs, predictable shapes. Humans can read it too.
+
+## What it does
+
+Three things go in your todo, in GTD shorthand:
+
+- **Projects** — outcomes that take more than one action. Anything you're
+  engaged with: "Telepath", "House move", "Q3 launch". Park them when life
+  moves on.
+- **Actions** — concrete things to do. The kind you can pick up and finish:
+  "email Steve", "buy headphones". They're either *active* (a next action,
+  ready to do) or *deferred* (someday/maybe — not now, not gone).
+- **Waiting** — things blocking on someone else: "cover art from designer",
+  "tax refund". You don't act on these; you watch them.
+
+Anything finishes one of two ways: **completed** (done) or **dropped**
+(not happening). For projects and actions you can also flip them between
+active and deferred — useful when something heats up or cools off.
+
+The dashboard view (`todo list`) shows what's *live*: the active actions you
+could do now, what you're waiting on, and which projects are in motion.
+`--all` adds the deferred stuff. Terminal items stay out of the way.
 
 ## Install
 
@@ -10,10 +30,10 @@ read it too.
 npm install -g @telepath-computer/todo
 ```
 
-The binary is `todo`. Data lives at `~/.todo/data/store.json` by default —
-override with `TODO_DATA_DIR=/abs/path` or `todo set-data-dir /abs/path`.
+The binary is `todo`. `todo --help` lists every command;
+`todo <command> --help` describes flags.
 
-## Example session
+## Example
 
 ```sh
 $ todo add project --title "Telepath" --note "Indie thinking tool"
@@ -49,40 +69,20 @@ $ todo list
   "waiting":         [ ... ]
 }
 
-$ todo complete K3jLm9pQ          # status=completed, closed_at=now
-$ todo activate K3jLm9pQ          # bring it back: status=active, closed_at=null
+$ todo complete K3jLm9pQ          # done
+$ todo activate K3jLm9pQ          # changed your mind: bring it back live
 ```
-
-`todo --help` lists every command; `todo <command> --help` describes flags.
-
-## What it does
-
-Three entity types share one JSON store:
-
-- **project** — a multi-action outcome. Active, deferred (paused), or terminal.
-- **action** — a doable next action. Active (next), deferred (someday), or terminal.
-- **waiting** — something you're waiting on someone else for. Active or terminal.
-
-Every entity has a stable 8-char nanoid (`Vh8XLm2k`) — IDs never shift on
-mutation and are never reused. Every command that takes `<id>` accepts any
-entity id; the CLI resolves polymorphically.
-
-Status: `active | deferred | completed | dropped` (waiting items can't be
-deferred). `closed_at` is non-null iff the entity is `completed` or `dropped`.
 
 ## Storage
 
-`store.json` is pretty-printed with sorted keys and atomic-written via tmpfile
-+ rename — safe to commit, sync (Dropbox, iCloud), or hand-edit. Single writer
-at a time.
-
-Config lives at `~/.todo/config.json`. Path resolution order:
-`TODO_DATA_DIR` env var → `dataDir` in config → default `~/.todo/data/`.
-Paths must be absolute.
+Data lives at `~/.todo/data/store.json`. Override with `TODO_DATA_DIR` or
+`todo set-data-dir <abs-path>` (writes `~/.todo/config.json`). The store is
+pretty-printed JSON with sorted keys — safe to commit, sync, or hand-edit.
+Single writer at a time.
 
 ## Docs
 
-- [docs/spec.md](docs/spec.md) — entity schema, CLI surface, error catalog.
+- [docs/spec.md](docs/spec.md) — full schema, CLI surface, error catalog.
 - [docs/architecture.md](docs/architecture.md) — implementation notes.
 
 ## License
