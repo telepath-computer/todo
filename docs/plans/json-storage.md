@@ -8,32 +8,50 @@ This is a focused storage swap with a few small model adjustments — not a rede
 
 ## Storage
 
-- Single file: `~/.todo/store.json`
-- `TODO_HOME` env var as the only override (test use; undocumented for users)
-- No config file, no `set-vault`, no `--vault` flag
-- Archive split deferred — completed and dropped tasks stay in `store.json` for now, just filtered out of default views
+Default layout:
 
-File shape:
+```
+~/.todo/
+├── config.json        # CLI config (data-dir override, etc.)
+└── data/
+    └── store.json     # all data
+```
+
+- Data file: `<data-dir>/store.json`. Default data-dir is `~/.todo/data/`.
+- Data-dir is configurable — users who want their data elsewhere (Dropbox, iCloud Drive, an external sync mechanism) can redirect it.
+- Resolution order: `TODO_DATA_DIR` env var (per-invocation override) > `config.json` `dataDir` setting > default `~/.todo/data/`.
+- `~/.todo/config.json` is always at this fixed path; only the data location moves.
+- Archive split deferred — completed and dropped tasks stay in `store.json` for now, just filtered out of default views.
+
+`config.json` shape (only `dataDir` for now; room to grow):
 
 ```json
 {
-  "tags": ["errand", "home", "waiting", "calls", "computer"],
+  "dataDir": "/Users/rupert/Dropbox/todo"
+}
+```
+
+`store.json` shape:
+
+```json
+{
+  "contexts": ["errand", "home", "waiting", "calls", "computer"],
   "projects": {
     "tel":    { "title": "Telepath", "note": null, "active": true, "completed": null, "dropped": null },
     "chores": { "title": "Chores",   "note": null, "active": true, "completed": null, "dropped": null }
   },
   "tasks": [
     { "id": 7, "project": "tel", "title": "Find guests", "available": true,
-      "tags": ["errand"], "due": "2026-05-01", "note": null,
+      "contexts": ["errand"], "due": "2026-05-01", "note": null,
       "created": "2026-04-27T10:14:32Z", "completed": null, "dropped": null },
     { "id": 42, "project": null, "title": "Pick up dry cleaning", "available": true,
-      "tags": ["errand"], "due": null, "note": null,
+      "contexts": ["errand"], "due": null, "note": null,
       "created": "2026-04-27T10:15:00Z", "completed": null, "dropped": null }
   ]
 }
 ```
 
-The top-level `tags` array is the **registry** — a controlled vocabulary. Tasks may only use tags from this list; unknown tags are rejected. New tags require explicit `todo tags add <tag>` (deliberate act, prevents slop). The store ships pre-populated with `["errand", "home", "waiting", "calls", "computer"]` as a sensible GTD-flavored starting set.
+The top-level `contexts` array is the **registry** — a controlled vocabulary. Tasks may only use contexts from this list; unknown contexts are rejected. New contexts require explicit `todo contexts add <name>` (deliberate act, prevents slop like `imp` vs `important`). The store ships pre-populated with `["errand", "home", "waiting", "calls", "computer"]` as a sensible GTD-flavored starting set.
 
 Pretty-printed (2-space indent, sorted keys) for clean diffs.
 
@@ -53,7 +71,7 @@ type Task = {
   project: string | null       // slug; null for standalone tasks
   title: string                // required
   available: boolean           // true = next action; false = someday
-  tags: string[]               // each tag must be in the registry; empty array if untagged
+  contexts: string[]           // each context must be in the registry; empty array if no contexts
   due: string | null           // YYYY-MM-DD
   note: string | null
   created: string              // ISO timestamp, auto-set on insert
@@ -77,10 +95,10 @@ type Task = {
 | `notes` | `note` | rename, singular |
 | `lane: available` | `available: true` | bool replaces 4-value lane |
 | `lane: deferred` | `available: false` | someday |
-| `lane: waiting` | `category: "waiting"` | waiting is just a category value |
+| `lane: waiting` | `contexts: ["waiting"]` | waiting is just a context value (in the registry) |
 | `lane: completed` | `completed: <iso>` set | derived from timestamp |
 | `done` | (removed) | derived from `completed != null` |
-| `contexts: string[]` | `tags: string[]` | renamed; multi-value preserved; values must be in registry |
+| `contexts: string[]` | `contexts: string[]` | preserved; values must now be in the registry |
 | `completedAt` | `completed` | rename |
 | (new) | `id` | stable ID |
 | (new) | `created` | ISO timestamp |
@@ -105,7 +123,7 @@ A project surfaces in `todo ls` if `project.active && project.completed === null
 todo ls                                # everything actionable: tasks + projects, mixed dashboard
 todo ls --tasks                        # tasks only
 todo ls --projects                     # projects only (with sections: Active / Inactive)
-todo ls --tag <tag>                    # filter tasks by tag
+todo ls --context <name>               # filter tasks by context
 todo ls --project <slug>               # tasks in one project
 todo show <ref>                        # polymorphic — show a task or a project
                                        #   <slug>      → project drill-down (all its tasks regardless of state)
@@ -116,8 +134,8 @@ todo show <ref>                        # polymorphic — show a task or a projec
 ### Task mutations (top-level — most common)
 
 ```
-todo add "<title>" [--project <slug>] [--tag <tag>]... [--due <date>] [--note <text>] [--available true|false]
-todo edit <ref>    [--title ...] [--project ...] [--tag <tag>]... [--due ...] [--note ...] [--available true|false]
+todo add "<title>" [--project <slug>] [--context <name>]... [--due <date>] [--note <text>] [--available true|false]
+todo edit <ref>    [--title ...] [--project ...] [--context <name>]... [--due ...] [--note ...] [--available true|false]
 todo defer <ref>                       # sets available=false (someday)
 todo activate <ref>                    # sets available=true (next action)
 todo complete <ref>                    # sets completed=now, clears dropped
@@ -127,7 +145,7 @@ todo reopen <ref>                      # clears completed and dropped
 
 `--available` defaults to `true` on `add`; pass `--available false` to file directly as someday. `defer`/`activate` are convenience verbs for flipping availability on existing tasks (parallel to `complete`/`reopen`).
 
-`--tag` is repeatable on `add` (initial set). On `edit`, repeated `--tag` flags **replace** the entire set; pass `--tag ""` once to clear.
+`--context` is repeatable on `add` (initial set). On `edit`, repeated `--context` flags **replace** the entire set; pass `--context ""` once to clear.
 
 ### Project mutations (namespaced)
 
@@ -139,23 +157,32 @@ todo projects drop <slug>
 todo projects reopen <slug>
 ```
 
-### Tag registry (controlled vocabulary)
+### Context registry (controlled vocabulary)
 
 ```
-todo tags ls                           # list registered tags
-todo tags add <tag>                    # explicitly register a new tag
-todo tags remove <tag>                 # errors if any item still uses it
+todo contexts ls                       # list registered contexts
+todo contexts add <name>               # explicitly register a new context
+todo contexts remove <name>            # errors if any item still uses it
 ```
 
-Adding a task with an unregistered tag is an error. The agent must either pick from existing tags or run `todo tags add <tag>` first — keeps the vocabulary curated and prevents slop (e.g. `imp` vs `important`).
+Adding a task with an unregistered context is an error. The agent must either pick from existing contexts or run `todo contexts add <name>` first — keeps the vocabulary curated and prevents slop (e.g. `imp` vs `important`).
+
+### Configuration
+
+```
+todo set-data-dir <path>               # writes dataDir to ~/.todo/config.json
+todo config                            # prints resolved config (data-dir, etc.)
+```
+
+Path resolution: `TODO_DATA_DIR` env var (per-invocation override) > `~/.todo/config.json` `dataDir` > default `~/.todo/data/`.
 
 ### Defaults
 
 - `todo add` without `--project` creates a standalone task (project=null)
-- New tasks: `available: true`, `tags: []`, `completed: null`, `dropped: null`
+- New tasks: `available: true`, `contexts: []`, `completed: null`, `dropped: null`
 - New projects: `active: true`, `completed: null`, `dropped: null`
-- Tag registry ships pre-populated with `["errand", "home", "waiting", "calls", "computer"]`
-- Adding a task with `--project X` or `--tag X` where X isn't registered is an error (use `todo projects add X` / `todo tags add X` first)
+- Context registry ships pre-populated with `["errand", "home", "waiting", "calls", "computer"]`
+- Adding a task with `--project X` or `--context X` where X isn't registered is an error (use `todo projects add X` / `todo contexts add X` first)
 
 ## Display
 
@@ -163,7 +190,6 @@ TTY-colored output, picocolors, existing style preserved. Default `todo ls`:
 
 ```
 Tasks:
-  (untagged)
     [ ] Find guests [tel#7]
   @errand
     [ ] Buy mic [tel#3]
@@ -175,7 +201,7 @@ Projects:
   ✳ Chores [chores]
 ```
 
-Tasks with multiple tags appear once, under their first alphabetical tag (same dedup logic as the existing `renderAvailableGrouped`). The full tag set is shown on the task line if rendered with `--verbose` or in `todo show`.
+Tasks with multiple contexts appear once, under their first alphabetical context (same dedup logic as the existing `renderAvailableGrouped`). Items with no contexts render first, ungrouped. The full context set is shown on the task line in `todo show <ref>`.
 
 `todo ls --projects` adds an Inactive section under Active.
 
@@ -184,12 +210,13 @@ Tasks with multiple tags appear once, under their first alphabetical tag (same d
 ## Code changes
 
 ### `src/core/`
-- **New `store.ts`** — resolves home (`TODO_HOME` || `~/.todo`), reads/writes `store.json`, atomic write via tmpfile + rename. Pretty-print + sorted keys.
-- **Replace `project.ts`** — schema types (`Project`, `Task`), pure validators, pure mutators (`addTask`, `editTask`, `setStatus`, `setActive`, etc.). No I/O, no markdown.
-- **Drop `vault.ts` and `config.ts`** entirely.
-- **`tasks.ts`** — keep result types; rename `lane` → split fields; rewire to store.
+- **`config.ts`** (rewritten) — resolves data-dir per the precedence rules (`TODO_DATA_DIR` env > `~/.todo/config.json` `dataDir` > default `~/.todo/data/`). Reads/writes `config.json` for `set-data-dir`.
+- **New `store.ts`** — given a resolved data-dir, reads/writes `<data-dir>/store.json` with atomic write via tmpfile + rename. Pretty-print + sorted keys.
+- **Replace `project.ts`** — schema types (`Project`, `Task`), pure validators, pure mutators (`addTask`, `editTask`, `setActive`, etc.). No I/O, no markdown.
+- **Drop `vault.ts`** entirely.
+- **`tasks.ts`** — keep result types; rename `lane` → `available`; rewire to store.
 - **`ref.ts`** — parses `<slug>#<id>` and `#<id>`; resolver looks up by id field.
-- **`errors.ts`** — keep `InvalidSlug`, `ProjectNotFound`, `ProjectAlreadyExists`, `NothingToEdit`, ref errors. Drop `MalformedProject`.
+- **`errors.ts`** — keep `InvalidSlug`, `ProjectNotFound`, `ProjectAlreadyExists`, `NothingToEdit`, ref errors. Add `UnknownContext`. Drop `MalformedProject`.
 - **`dates.ts`** — unchanged.
 
 ### `src/views/`
@@ -202,28 +229,29 @@ Tasks with multiple tags appear once, under their first alphabetical tag (same d
 - **`projects.ts`** — `add`, `edit`, `complete`, `drop`, `reopen`.
 - **`ls.ts`** (new) — unified read command with `--tasks`/`--projects`/`--category`/`--project` filters.
 - **`show.ts`** (new) — polymorphic show by ref shape.
-- **`config.ts`** — deleted.
+- **`config.ts`** — keeps `set-data-dir` and `config` (print resolved config); drops `set-vault`.
 - **`list.ts`** — deleted (replaced by `ls.ts`).
 
 ### `src/cli.ts`
 - Drop `--vault` global flag, `set-vault` subcommand.
+- Add `set-data-dir <path>`, `config` (top-level).
 - Drop `tasks list`, `lists list`, top-level `list` (replaced by `ls`).
 - Drop `tasks <verb>` namespace; tasks verbs become top-level.
 - Update tagline.
 
 ## Tests
 
-- **`tests/project.test.ts`** — gut and rewrite. Schema validation, ID assignment (max+1 in scope), state transitions, round-trip notes/category. Drop all markdown-parser tests.
+- **`tests/project.test.ts`** — gut and rewrite. Schema validation, ID assignment (max+1 in scope), state transitions, round-trip notes/contexts, context-registry enforcement. Drop all markdown-parser tests.
 - **`tests/cli.e2e.test.ts`** — survives mostly. Update commands (`tasks list` → `ls --tasks`, `projects show` → `show <slug>`, etc.), update on-disk reads to parse JSON, drop shift-advisory assertions.
 - **`tests/tasks.test.ts`** — adapt to field renames, drop lane references, drop shift assertions.
 - **`tests/ref.test.ts`** — handle `#<id>` (projectless) and `<slug>#<id>` resolution by id.
-- **`tests/config.test.ts`** — delete.
-- **`tests/helpers.ts`** — `makeTempVault` → `makeTempHome`; sets `TODO_HOME`.
+- **`tests/config.test.ts`** — rewrite for `set-data-dir` resolution (env > config > default).
+- **`tests/helpers.ts`** — `makeTempVault` → `makeTempDataDir`; sets `TODO_DATA_DIR`.
 - **`tests/dates.test.ts`** — unchanged.
 
 ## Docs
 
-- **`README.md`** — rewrite. Drop "markdown / Obsidian / wikilinks" language. Show JSON example. Document `~/.todo/store.json`.
+- **`README.md`** — rewrite. Drop "markdown / Obsidian / wikilinks" language. Show JSON example. Document `~/.todo/data/store.json` and `set-data-dir`.
 - **`docs/spec.md`** — rewrite. New storage section, JSON schema, ID rule, new CLI surface.
 - **`docs/cli.md`** — update commands.
 - **`skill/SKILL.md`** — populate. Agent-facing docs: refs, ID rules, schema shape.
@@ -244,5 +272,4 @@ Tasks with multiple tags appear once, under their first alphabetical tag (same d
 - Migration from `.md` files. There is none. Old vaults are abandoned; the CLI no longer reads them.
 - Archive split (active/archive files). Deferred — single-file is fine for now; split when active.json grows uncomfortably large.
 - Backwards-compat flags or syntax.
-- Multiple homes / vaults.
-- Category registry / controlled vocabulary. Free-form for now; revisit if slop appears.
+- Multiple data stores / vaults (only one data-dir at a time).
