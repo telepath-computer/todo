@@ -121,7 +121,6 @@ A project surfaces in `todo ls` if `project.active && project.completed === null
 
 ```
 todo ls                                # everything actionable: tasks + projects
-todo ls --context <name>               # filter tasks by context
 todo show <ref>                        # polymorphic — show a task or a project
                                        #   <slug>      → project drill-down (all its tasks regardless of state)
                                        #   <slug>#<id> → task detail
