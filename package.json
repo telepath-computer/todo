@@ -1,6 +1,6 @@
 {
   "name": "@telepath-computer/todo",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "GTD-style task and project CLI with JSON storage. Agent-first: discriminated entity types, stable nanoid refs, JSON-only output.",
   "type": "module",
   "bin": {
