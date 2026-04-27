@@ -32,13 +32,13 @@ export function addCmd(opts: AddCmdOpts): string {
   const { dataDir } = resolveDataDir()
   const store = readStore(dataDir)
   const id = newId()
-  const created = nowIso()
+  const created_at = nowIso()
   const project = opts.project ?? null
 
   if (opts.waiting) {
     const { store: next, entity } = addWaiting(store, {
       id,
-      created,
+      created_at,
       title: opts.title,
       project,
       note: opts.note ?? null,
@@ -50,7 +50,7 @@ export function addCmd(opts: AddCmdOpts): string {
   const due = opts.due !== undefined ? resolveDueInput(opts.due) : null
   const { store: next, entity } = addAction(store, {
     id,
-    created,
+    created_at,
     title: opts.title,
     status: opts.active ? 'active' : 'deferred',
     project,

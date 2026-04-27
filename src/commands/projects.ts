@@ -12,7 +12,7 @@ export function addProjectCmd(opts: AddProjectOpts): string {
   const store = readStore(dataDir)
   const { store: next, entity } = addProject(store, {
     id: newId(),
-    created: nowIso(),
+    created_at: nowIso(),
     title: opts.title,
     note: opts.note ?? null,
   })

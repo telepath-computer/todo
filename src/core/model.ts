@@ -9,13 +9,13 @@ export type BaseList = {
   id: string
   title: string
   note: string | null
-  created: string
+  created_at: string
 }
 
 export type ProjectList = BaseList & {
   type: 'project'
   status: Status
-  closed: string | null     // ISO ts; non-null iff status is completed/dropped
+  closed_at: string | null     // ISO ts; non-null iff status is completed/dropped
 }
 
 export type List = ProjectList
@@ -25,20 +25,20 @@ export type BaseItem = {
   project: string | null
   title: string
   note: string | null
-  created: string
+  created_at: string
 }
 
 export type ActionItem = BaseItem & {
   type: 'action'
   status: Status
   due: string | null
-  closed: string | null
+  closed_at: string | null
 }
 
 export type WaitingItem = BaseItem & {
   type: 'waiting'
   status: WaitingStatus
-  closed: string | null
+  closed_at: string | null
 }
 
 export type Item = ActionItem | WaitingItem
@@ -110,7 +110,7 @@ function replaceItem(s: Store, next: Item): Store {
 
 export type AddProjectInput = {
   id: string
-  created: string
+  created_at: string
   title: string
   note?: string | null
 }
@@ -121,16 +121,16 @@ export function addProject(s: Store, input: AddProjectInput): { store: Store; en
     type: 'project',
     title: requireValidTitle(input.title),
     note: input.note ?? null,
-    created: input.created,
+    created_at: input.created_at,
     status: 'active',
-    closed: null,
+    closed_at: null,
   }
   return { store: { ...s, lists: [...s.lists, entity] }, entity }
 }
 
 export type AddActionInput = {
   id: string
-  created: string
+  created_at: string
   title: string
   status: 'active' | 'deferred'
   project?: string | null
@@ -147,17 +147,17 @@ export function addAction(s: Store, input: AddActionInput): { store: Store; enti
     project: input.project ?? null,
     title: input.title,
     note: input.note ?? null,
-    created: input.created,
+    created_at: input.created_at,
     status: input.status,
     due: input.due ?? null,
-    closed: null,
+    closed_at: null,
   }
   return { store: { ...s, items: [...s.items, entity] }, entity }
 }
 
 export type AddWaitingInput = {
   id: string
-  created: string
+  created_at: string
   title: string
   project?: string | null
   note?: string | null
@@ -172,9 +172,9 @@ export function addWaiting(s: Store, input: AddWaitingInput): { store: Store; en
     project: input.project ?? null,
     title: input.title,
     note: input.note ?? null,
-    created: input.created,
+    created_at: input.created_at,
     status: 'active',
-    closed: null,
+    closed_at: null,
   }
   return { store: { ...s, items: [...s.items, entity] }, entity }
 }
@@ -253,7 +253,7 @@ export function setStatus(
   }
 
   const e = requireEntity(s, id)
-  const closed = isTerminal(status) ? ts : null
+  const closed_at = isTerminal(status) ? ts : null
 
   if (e.type === 'waiting') {
     if (!isTerminal(status)) {
@@ -262,14 +262,14 @@ export function setStatus(
           `(waiting items only transition to completed/dropped)`,
       )
     }
-    const next: WaitingItem = { ...e, status, closed }
+    const next: WaitingItem = { ...e, status, closed_at }
     return { store: replaceItem(s, next), entity: next }
   }
   if (e.type === 'project') {
-    const next: ProjectList = { ...e, status, closed }
+    const next: ProjectList = { ...e, status, closed_at }
     return { store: replaceList(s, next), entity: next }
   }
-  const next: ActionItem = { ...e, status, closed }
+  const next: ActionItem = { ...e, status, closed_at }
   return { store: replaceItem(s, next), entity: next }
 }
 

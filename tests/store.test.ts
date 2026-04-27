@@ -64,7 +64,7 @@ describe('readStore / writeStore', () => {
       const ts = nowIso()
       const seeded = addProject({ lists: [], items: [] }, {
         id: newId(),
-        created: ts,
+        created_at: ts,
         title: 'Sample',
         note: null,
       }).store
@@ -86,7 +86,7 @@ describe('readStore / writeStore', () => {
             type: 'project',
             title: 'X',
             note: null,
-            created: '2026-04-27T10:00:00Z',
+            created_at: '2026-04-27T10:00:00Z',
             active: true,
             completed: null,
             dropped: null,
@@ -134,7 +134,7 @@ describe('readStore / writeStore', () => {
     const dir = makeTempDataDir()
     try {
       mkdirSync(dir, { recursive: true })
-      const raw = `{"lists":[{"id":"P1","type":"project","title":"Hi","note":null,"created":"${nowIso()}","active":true,"completed":null,"dropped":null}],"items":[]}`
+      const raw = `{"lists":[{"id":"P1","type":"project","title":"Hi","note":null,"created_at":"${nowIso()}","active":true,"completed":null,"dropped":null}],"items":[]}`
       writeFileSync(join(dir, 'store.json'), raw)
       const back = readStore(dir)
       assert.equal(back.lists.length, 1)

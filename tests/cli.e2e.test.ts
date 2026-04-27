@@ -12,8 +12,8 @@ type Project = {
   title: string
   note: string | null
   status: Status
-  closed: string | null
-  created: string
+  closed_at: string | null
+  created_at: string
 }
 
 type Action = {
@@ -22,10 +22,10 @@ type Action = {
   title: string
   project: string | null
   note: string | null
-  created: string
+  created_at: string
   status: Status
   due: string | null
-  closed: string | null
+  closed_at: string | null
 }
 
 type Waiting = {
@@ -34,9 +34,9 @@ type Waiting = {
   title: string
   project: string | null
   note: string | null
-  created: string
+  created_at: string
   status: 'active' | 'completed' | 'dropped'
-  closed: string | null
+  closed_at: string | null
 }
 
 type Item = Action | Waiting
@@ -214,7 +214,7 @@ describe('todo add', () => {
     assert.equal(a.status, 'active')
     assert.equal(a.project, proj.id)
     assert.equal(a.due, '2026-05-03')
-    assert.equal(a.closed, null)
+    assert.equal(a.closed_at, null)
     assert.match(a.id, /^[0-9a-zA-Z]{8}$/)
   })
 
@@ -324,7 +324,7 @@ describe('todo projects add/edit', () => {
     assert.equal(p.type, 'project')
     assert.equal(p.note, 'big idea')
     assert.equal(p.status, 'active')
-    assert.equal(p.closed, null)
+    assert.equal(p.closed_at, null)
   })
 
   it('edits a project, clearing note with ""', () => {
@@ -350,7 +350,7 @@ describe('lifecycle (activate/defer/complete/drop)', () => {
     cli('complete', p.id)
     const out = parseJson<Project>(cli('activate', p.id).stdout)
     assert.equal(out.status, 'active')
-    assert.equal(out.closed, null)
+    assert.equal(out.closed_at, null)
   })
 
   it('defer sets status=deferred and clears closed', () => {
@@ -358,7 +358,7 @@ describe('lifecycle (activate/defer/complete/drop)', () => {
     cli('drop', a.id)
     const out = parseJson<Action>(cli('defer', a.id).stdout)
     assert.equal(out.status, 'deferred')
-    assert.equal(out.closed, null)
+    assert.equal(out.closed_at, null)
   })
 
   it('activate/defer both reject waiting items', () => {
@@ -375,17 +375,17 @@ describe('lifecycle (activate/defer/complete/drop)', () => {
     const a = addAction('x', { active: true })
     let out: Item = parseJson<Action>(cli('complete', a.id).stdout)
     assert.equal(out.status, 'completed')
-    assert.notEqual(out.closed, null)
+    assert.notEqual(out.closed_at, null)
     out = parseJson<Action>(cli('drop', a.id).stdout)
     assert.equal(out.status, 'dropped')
-    assert.notEqual(out.closed, null)
+    assert.notEqual(out.closed_at, null)
   })
 
   it('complete/drop accept waiting items', () => {
     const w = addWaitingItem('w')
     const out = parseJson<Waiting>(cli('complete', w.id).stdout)
     assert.equal(out.status, 'completed')
-    assert.notEqual(out.closed, null)
+    assert.notEqual(out.closed_at, null)
   })
 })
 

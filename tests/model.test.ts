@@ -29,12 +29,12 @@ const T0 = '2026-04-27T10:00:00Z'
 
 function seed(): Store {
   let s: Store = EMPTY_STORE
-  s = addProject(s, { id: 'P1', created: T0, title: 'Proj A' }).store
-  s = addProject(s, { id: 'P2', created: T0, title: 'Proj B' }).store
-  s = addAction(s, { id: 'A1', created: T0, title: 'A1 task', status: 'active', project: 'P1' }).store
-  s = addAction(s, { id: 'A2', created: T0, title: 'A2 task', status: 'deferred', project: 'P1' }).store
-  s = addAction(s, { id: 'A3', created: T0, title: 'standalone', status: 'active', project: null }).store
-  s = addWaiting(s, { id: 'W1', created: T0, title: 'cover art', project: 'P1' }).store
+  s = addProject(s, { id: 'P1', created_at: T0, title: 'Proj A' }).store
+  s = addProject(s, { id: 'P2', created_at: T0, title: 'Proj B' }).store
+  s = addAction(s, { id: 'A1', created_at: T0, title: 'A1 task', status: 'active', project: 'P1' }).store
+  s = addAction(s, { id: 'A2', created_at: T0, title: 'A2 task', status: 'deferred', project: 'P1' }).store
+  s = addAction(s, { id: 'A3', created_at: T0, title: 'standalone', status: 'active', project: null }).store
+  s = addWaiting(s, { id: 'W1', created_at: T0, title: 'cover art', project: 'P1' }).store
   return s
 }
 
@@ -51,7 +51,7 @@ describe('addProject', () => {
   it('inserts a project at status=active with closed=null', () => {
     const { store, entity } = addProject(EMPTY_STORE, {
       id: 'X1',
-      created: T0,
+      created_at: T0,
       title: 'New',
       note: 'hi',
     })
@@ -59,14 +59,14 @@ describe('addProject', () => {
     assert.equal(entity.title, 'New')
     assert.equal(entity.note, 'hi')
     assert.equal(entity.status, 'active')
-    assert.equal(entity.closed, null)
-    assert.equal(entity.created, T0)
+    assert.equal(entity.closed_at, null)
+    assert.equal(entity.created_at, T0)
     assert.equal(store.lists.length, 1)
   })
 
   it('rejects empty title', () => {
     assert.throws(
-      () => addProject(EMPTY_STORE, { id: 'X1', created: T0, title: '   ' }),
+      () => addProject(EMPTY_STORE, { id: 'X1', created_at: T0, title: '   ' }),
       InvalidArgument,
     )
   })
@@ -75,10 +75,10 @@ describe('addProject', () => {
 describe('addAction', () => {
   it('creates an active action with parent project', () => {
     let s: Store = EMPTY_STORE
-    s = addProject(s, { id: 'P1', created: T0, title: 'P' }).store
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
     const { entity } = addAction(s, {
       id: 'A1',
-      created: T0,
+      created_at: T0,
       title: 'Do thing',
       status: 'active',
       project: 'P1',
@@ -88,13 +88,13 @@ describe('addAction', () => {
     assert.equal(entity.project, 'P1')
     assert.equal(entity.status, 'active')
     assert.equal(entity.due, '2026-05-01')
-    assert.equal(entity.closed, null)
+    assert.equal(entity.closed_at, null)
   })
 
   it('creates a deferred standalone action', () => {
     const { entity } = addAction(EMPTY_STORE, {
       id: 'A1',
-      created: T0,
+      created_at: T0,
       title: 'Someday',
       status: 'deferred',
     })
@@ -107,7 +107,7 @@ describe('addAction', () => {
       () =>
         addAction(EMPTY_STORE, {
           id: 'A1',
-          created: T0,
+          created_at: T0,
           title: 'x',
           status: 'active',
           project: 'NOPE',
@@ -121,12 +121,12 @@ describe('addWaiting', () => {
   it('creates a waiting item at status=active', () => {
     const { entity } = addWaiting(EMPTY_STORE, {
       id: 'W1',
-      created: T0,
+      created_at: T0,
       title: 'Waiting',
     })
     assert.equal(entity.type, 'waiting')
     assert.equal(entity.status, 'active')
-    assert.equal(entity.closed, null)
+    assert.equal(entity.closed_at, null)
   })
 })
 
@@ -211,7 +211,7 @@ describe('setStatus', () => {
     s = setStatus(s, 'A2', 'completed', T0).store
     const { entity } = setStatus(s, 'A2', 'active', null)
     assert.equal((entity as ActionItem).status, 'active')
-    assert.equal((entity as ActionItem).closed, null)
+    assert.equal((entity as ActionItem).closed_at, null)
   })
 
   it('defers a project that was dropped', () => {
@@ -219,7 +219,7 @@ describe('setStatus', () => {
     s = setStatus(s, 'P1', 'dropped', T0).store
     const { entity } = setStatus(s, 'P1', 'deferred', null)
     assert.equal((entity as ProjectList).status, 'deferred')
-    assert.equal((entity as ProjectList).closed, null)
+    assert.equal((entity as ProjectList).closed_at, null)
   })
 
   it('rejects activate and defer on waiting items', () => {
@@ -230,13 +230,13 @@ describe('setStatus', () => {
   it('completes a waiting item', () => {
     const { entity } = setStatus(seed(), 'W1', 'completed', T0)
     assert.equal((entity as WaitingItem).status, 'completed')
-    assert.equal((entity as WaitingItem).closed, T0)
+    assert.equal((entity as WaitingItem).closed_at, T0)
   })
 
   it('drops a project', () => {
     const { entity } = setStatus(seed(), 'P1', 'dropped', T0)
     assert.equal((entity as ProjectList).status, 'dropped')
-    assert.equal((entity as ProjectList).closed, T0)
+    assert.equal((entity as ProjectList).closed_at, T0)
   })
 
   it('rejects active/deferred with a timestamp', () => {
@@ -254,12 +254,12 @@ describe('setStatus', () => {
     s = setStatus(s, 'A1', 'completed', T0).store
     let entity = findItem(s, 'A1') as ActionItem
     assert.equal(entity.status, 'completed')
-    assert.equal(entity.closed, T0)
+    assert.equal(entity.closed_at, T0)
 
     s = setStatus(s, 'A1', 'dropped', '2026-04-28T00:00:00Z').store
     entity = findItem(s, 'A1') as ActionItem
     assert.equal(entity.status, 'dropped')
-    assert.equal(entity.closed, '2026-04-28T00:00:00Z')
+    assert.equal(entity.closed_at, '2026-04-28T00:00:00Z')
   })
 })
 
@@ -324,7 +324,7 @@ describe('immutability', () => {
     const s: Store = EMPTY_STORE
     const beforeLists = s.lists
     const beforeItems = s.items
-    const { store } = addProject(s, { id: 'P', created: T0, title: 'X' })
+    const { store } = addProject(s, { id: 'P', created_at: T0, title: 'X' })
     assert.notEqual(store.lists, beforeLists)
     assert.equal(s.lists, beforeLists)
     assert.equal(s.items, beforeItems)
