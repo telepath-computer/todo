@@ -2,9 +2,9 @@
 
 ## Goal
 
-Move task storage from per-project markdown files to a single JSON file. Give every task a stable ID that doesn't shift on mutation. Drop the markdown-specific machinery.
+Move task storage from per-project markdown files to a single JSON file. Give every entity a stable, opaque ID (nanoid) that doesn't shift on mutation. Drop the markdown-specific machinery.
 
-This is a focused storage swap with a few small model adjustments — not a redesign. Existing CLI display style (TTY colors, sections, picocolors) is preserved. Existing concepts (projects, contexts/categories, available/someday distinction, completion archive, due dates, task notes) all carry over with renamed fields.
+A focused storage swap with an agent-first reorientation: the CLI is invoked by an LLM agent (primary) and humans (secondary). All data is structured JSON; refs are nanoid-based; the CLI keeps the existing `todo <namespace> <verb>` shape (e.g. `todo tasks add`, `todo projects list`) for clarity and clean separation between task and project semantics.
 
 ## Storage
 
@@ -36,17 +36,19 @@ Default layout:
 ```json
 {
   "contexts": ["errand", "home", "waiting", "calls", "computer"],
-  "projects": {
-    "tel":    { "title": "Telepath", "note": null, "active": true, "completed": null, "dropped": null },
-    "chores": { "title": "Chores",   "note": null, "active": true, "completed": null, "dropped": null }
-  },
+  "projects": [
+    { "id": "Vh8XLm2k", "title": "Telepath", "note": null,
+      "status": "actionable", "closed": null }
+  ],
   "tasks": [
-    { "id": 7, "project": "tel", "title": "Find guests", "available": true,
+    { "id": "K3jLm9pQ", "project": "Vh8XLm2k", "title": "Find guests",
+      "status": "actionable", "closed": null,
       "contexts": ["errand"], "due": "2026-05-01", "note": null,
-      "created": "2026-04-27T10:14:32Z", "completed": null, "dropped": null },
-    { "id": 42, "project": null, "title": "Pick up dry cleaning", "available": true,
+      "created": "2026-04-27T10:14:32Z" },
+    { "id": "P7nW3qZb", "project": null, "title": "Pick up dry cleaning",
+      "status": "actionable", "closed": null,
       "contexts": ["errand"], "due": null, "note": null,
-      "created": "2026-04-27T10:15:00Z", "completed": null, "dropped": null }
+      "created": "2026-04-27T10:15:00Z" }
   ]
 }
 ```
@@ -57,35 +59,37 @@ Pretty-printed (2-space indent, sorted keys) for clean diffs.
 
 ## Schema
 
+Single status enum, shared by both Project and Task:
+
 ```typescript
+type Status = "actionable" | "deferred" | "completed" | "dropped"
+
 type Project = {
-  title: string
+  id: string                   // nanoid (8 chars); canonical handle
+  title: string                // human-readable name
   note: string | null
-  active: boolean              // currently engaged with the project
-  completed: string | null     // ISO ts when completed
-  dropped: string | null       // ISO ts when dropped (mutually exclusive with completed)
+  status: Status
+  closed: string | null        // ISO ts; non-null iff status is "completed" or "dropped"
 }
 
 type Task = {
-  id: number                   // per-project namespace; never reused for the life of a task
-  project: string | null       // slug; null for standalone tasks
-  title: string                // required
-  available: boolean           // true = next action; false = someday
+  id: string                   // nanoid (8 chars); canonical handle, never reused
+  project: string | null       // project ID; null for standalone tasks
+  title: string
+  status: Status
+  closed: string | null
   contexts: string[]           // each context must be in the registry; empty array if no contexts
   due: string | null           // YYYY-MM-DD
   note: string | null
   created: string              // ISO timestamp, auto-set on insert
-  completed: string | null
-  dropped: string | null       // mutually exclusive with completed
 }
 ```
 
-**ID assignment:** `max(existing ids where same project) + 1` on insert. IDs are unique within the (project | null) namespace, so `#7` and `tel#7` are distinct tasks. Once assigned, never reused.
+The four statuses are mutually exclusive. `closed` is set to the timestamp of the transition into a terminal state; for `actionable` and `deferred` it must be null.
 
-**Refs:**
-- Projected: `<slug>#<id>` (e.g. `tel#7`)
-- Projectless: `#<id>` (e.g. `#42`)
-- Slugs match `^[a-z0-9][a-z0-9.-]*$` (unchanged)
+**IDs:** 8-char nanoids (alphanumeric, URL-safe), generated on insert. Never reused. Globally unique across the store. Multi-device-safe: each device generates its own IDs without coordination.
+
+**Refs:** the `id` itself, plain. `Vh8XLm2k` for project, `K3jLm9pQ` for task. Refs are scoped by their command namespace: `todo tasks <verb> <id>` expects a task ID and `todo projects <verb> <id>` expects a project ID. No cross-space lookup needed.
 
 ## Field migrations from existing
 
@@ -93,77 +97,88 @@ type Task = {
 |---|---|---|
 | `text` | `title` | rename |
 | `notes` | `note` | rename, singular |
-| `lane: available` | `available: true` | bool replaces 4-value lane |
-| `lane: deferred` | `available: false` | someday |
-| `lane: waiting` | `contexts: ["waiting"]` | waiting is just a context value (in the registry) |
-| `lane: completed` | `completed: <iso>` set | derived from timestamp |
-| `done` | (removed) | derived from `completed != null` |
+| `lane: available` | `status: "actionable"` | enum replaces 4-value lane |
+| `lane: deferred` | `status: "deferred"` | someday |
+| `lane: waiting` | `contexts: ["waiting"]` | waiting is just a context value |
+| `lane: completed` | `status: "completed"`, `closed: <iso>` | terminal |
+| `done` | (removed) | derived from `status === "completed"` |
 | `contexts: string[]` | `contexts: string[]` | preserved; values must now be in the registry |
-| `completedAt` | `completed` | rename |
-| (new) | `id` | stable ID |
+| `completedAt` | `closed` | rename; same field for completed and dropped |
+| project slug | project nanoid | slugs gone; titles still human-readable |
+| (new) | `id` (nanoid) | stable ID for both projects and tasks |
 | (new) | `created` | ISO timestamp |
-| (new) | `dropped` | ISO timestamp; alternative to `completed` |
-| Project (new) | `active` | bool |
-| Project (new) | `completed`, `dropped` | terminal states |
+| (new) | `status: "dropped"`, `closed: <iso>` | new terminal state distinct from completed |
 
 ## Visibility / cascade rules
 
-A task surfaces in `todo ls` (default actionable view) if **all** of:
-- `task.available === true`
-- `task.completed === null && task.dropped === null`
-- Either `task.project === null` OR (`project.active === true && project.completed === null && project.dropped === null`)
+A task surfaces in the default `todo tasks list` and `todo list` if **all** of:
+- `task.status === "actionable"`
+- Either `task.project === null` OR `project.status === "actionable"`
 
-A project surfaces in `todo ls` if `project.active && project.completed === null && project.dropped === null`.
+A project surfaces in default views if `project.status === "actionable"`.
+
+`--all` widens to include `status === "deferred"`. `--completed` and `--dropped` show those terminal sets explicitly.
 
 ## CLI surface
 
 ### Reads
 
 ```
-todo ls                                # everything actionable: tasks + projects
-todo ls --all                          # also include someday tasks and inactive projects
-                                       # (still excludes completed/dropped — those are terminal)
-todo show <ref>                        # polymorphic — show a task or a project
-                                       #   <slug>      → project drill-down (all its tasks regardless of state)
-                                       #   <slug>#<id> → task detail
-                                       #   #<id>       → standalone task detail
+todo list                              # cross-cutting dashboard: actionable tasks + projects
+todo list --all                        # also include deferred
+
+todo tasks list                        # actionable tasks
+todo tasks list --all                  # actionable + deferred
+todo tasks list --completed            # completed tasks
+todo tasks list --dropped              # dropped tasks
+todo tasks show <id>                   # task detail
+
+todo projects list                     # actionable projects
+todo projects list --all               # actionable + deferred
+todo projects list --completed         # completed projects
+todo projects list --dropped           # dropped projects
+todo projects show <id>                # project drill-down (all its tasks regardless of status)
 ```
 
-### Task mutations (top-level — most common)
+### Task mutations
 
 ```
-todo add "<title>" [--project <slug>] [--context <name>]... [--due <date>] [--note <text>] [--available true|false]
-todo edit <ref>    [--title ...] [--project ...] [--context <name>]... [--due ...] [--note ...] [--available true|false]
-todo defer <ref>                       # sets available=false (someday)
-todo activate <ref>                    # sets available=true (next action)
-todo complete <ref>                    # sets completed=now, clears dropped
-todo drop <ref>                        # sets dropped=now, clears completed
-todo reopen <ref>                      # clears completed and dropped
+todo tasks add "<title>" [--project <id>] [--context <name>]... [--due <date>] [--note <text>] [--status <s>]
+todo tasks edit <id>     [--title ...] [--note ...] [--due ...] [--project ...] [--context <name>]... [--status <s>]
+todo tasks defer <id>                  # status: deferred
+todo tasks activate <id>               # status: actionable
+todo tasks complete <id>               # status: completed, closed: now
+todo tasks drop <id>                   # status: dropped, closed: now
+todo tasks reopen <id>                 # status: actionable, closed: null
 ```
 
-`--available` defaults to `true` on `add`; pass `--available false` to file directly as someday. `defer`/`activate` are convenience verbs for flipping availability on existing tasks (parallel to `complete`/`reopen`).
-
-`--context` is repeatable on `add` (initial set). On `edit`, repeated `--context` flags **replace** the entire set; pass `--context ""` once to clear.
-
-### Project mutations (namespaced)
+### Project mutations
 
 ```
-todo projects add <slug>    [--title <text>] [--note <text>]
-todo projects edit <slug>   [--title ...] [--note ...] [--active true|false]
-todo projects complete <slug>
-todo projects drop <slug>
-todo projects reopen <slug>
+todo projects add --title "<text>" [--note <text>]
+todo projects edit <id>     [--title ...] [--note ...] [--status <s>]
+todo projects defer <id>
+todo projects activate <id>
+todo projects complete <id>
+todo projects drop <id>
+todo projects reopen <id>
 ```
+
+`add` operations return the new entity (including its ID) so the agent can chain.
+
+`--status` defaults to `actionable` on `add`. Verbs (`defer`/`activate`/`complete`/`drop`/`reopen`) are common-case shortcuts; `--status <value>` on `edit` is the explicit form. Setting `--status completed` or `--status dropped` also sets `closed = now`; setting any non-terminal status clears `closed`.
+
+`--context` is repeatable on `tasks add` (initial set). On `tasks edit`, repeated `--context` flags **replace** the entire set; pass `--context ""` once to clear.
 
 ### Context registry (controlled vocabulary)
 
 ```
-todo contexts ls                       # list registered contexts
+todo contexts list                     # list registered contexts
 todo contexts add <name>               # explicitly register a new context
-todo contexts remove <name>            # errors if any item still uses it
+todo contexts remove <name>            # errors if any task still uses it
 ```
 
-Adding a task with an unregistered context is an error. The agent must either pick from existing contexts or run `todo contexts add <name>` first — keeps the vocabulary curated and prevents slop (e.g. `imp` vs `important`).
+Adding a task with an unregistered context is an error. The agent must either pick from existing contexts or run `todo contexts add <name>` first.
 
 ### Configuration
 
@@ -172,77 +187,75 @@ todo set-data-dir <path>               # writes dataDir to ~/.todo/config.json
 todo config                            # prints resolved config (data-dir, etc.)
 ```
 
-Path resolution: `TODO_DATA_DIR` env var (per-invocation override) > `~/.todo/config.json` `dataDir` > default `~/.todo/data/`.
+Resolution: `TODO_DATA_DIR` env > `~/.todo/config.json` `dataDir` > default `~/.todo/data/`.
 
 ### Defaults
 
-- `todo add` without `--project` creates a standalone task (project=null)
-- New tasks: `available: true`, `contexts: []`, `completed: null`, `dropped: null`
-- New projects: `active: true`, `completed: null`, `dropped: null`
+- `todo tasks add` without `--project` creates a standalone task (`project: null`)
+- New tasks: `status: "actionable"`, `contexts: []`, `closed: null`
+- New projects: `status: "actionable"`, `closed: null`
 - Context registry ships pre-populated with `["errand", "home", "waiting", "calls", "computer"]`
-- Adding a task with `--project X` or `--context X` where X isn't registered is an error (use `todo projects add X` / `todo contexts add X` first)
+- Adding a task with `--project X` or `--context X` where X isn't registered/found is an error
 
 ## Display
 
-TTY-colored output, picocolors, existing style preserved. Default `todo ls`:
+TTY-colored output, picocolors, existing style preserved. `todo list` (default dashboard):
 
 ```
 Tasks:
-    [ ] Find guests [tel#7]
+    [ ] Find guests [K3jLm9pQ]
   @errand
-    [ ] Buy mic [tel#3]
+    [ ] Buy mic [P7nW3qZb]
   @waiting
-    [ ] Cover art [tel#8]
+    [ ] Cover art [Bn4Gh1Xt]
 
 Projects:
-  ✳ Telepath [tel]
-  ✳ Chores [chores]
+  ✳ Telepath [Vh8XLm2k]
+  ✳ Chores   [Yk2Lm9wT]
 ```
 
-Tasks with multiple contexts appear once, under their first alphabetical context (same dedup logic as the existing `renderAvailableGrouped`). Items with no contexts render first, ungrouped. The full context set is shown on the task line in `todo show <ref>`.
+Tasks with multiple contexts appear once, under their first alphabetical context (same dedup logic as the existing `renderAvailableGrouped`). Items with no contexts render first, ungrouped. The full context set is shown on the task line in `todo tasks show <id>`.
 
-The Projects section in `todo ls` shows only active, non-terminal projects. Inactive or closed projects don't surface there — visit them via `todo show <slug>`.
-
-`todo show <slug>` (project drill-down) shows the project header + all its tasks regardless of state, broken into Available / Someday / Completed / Dropped subsections.
+`todo projects show <id>` (project drill-down) shows the project header + all its tasks regardless of status, broken into Actionable / Deferred / Completed / Dropped subsections.
 
 ## Code changes
 
 ### `src/core/`
-- **`config.ts`** (rewritten) — resolves data-dir per the precedence rules (`TODO_DATA_DIR` env > `~/.todo/config.json` `dataDir` > default `~/.todo/data/`). Reads/writes `config.json` for `set-data-dir`.
-- **New `store.ts`** — given a resolved data-dir, reads/writes `<data-dir>/store.json` with atomic write via tmpfile + rename. Pretty-print + sorted keys.
-- **Replace `project.ts`** — schema types (`Project`, `Task`), pure validators, pure mutators (`addTask`, `editTask`, `setActive`, etc.). No I/O, no markdown.
+- **`config.ts`** (rewritten) — resolves data-dir per the precedence rules. Reads/writes `config.json` for `set-data-dir`.
+- **New `store.ts`** — given a resolved data-dir, reads/writes `<data-dir>/store.json` with atomic write via tmpfile + rename. Pretty-print + sorted keys. Generates nanoids on insert.
+- **Replace `project.ts`** — schema types (`Project`, `Task`, `Status`), pure validators, pure mutators (`addTask`, `editTask`, `setStatus`, etc.). No I/O, no markdown.
 - **Drop `vault.ts`** entirely.
-- **`tasks.ts`** — keep result types; rename `lane` → `available`; rewire to store.
-- **`ref.ts`** — parses `<slug>#<id>` and `#<id>`; resolver looks up by id field.
-- **`errors.ts`** — keep `InvalidSlug`, `ProjectNotFound`, `ProjectAlreadyExists`, `NothingToEdit`, ref errors. Add `UnknownContext`. Drop `MalformedProject`.
+- **`tasks.ts`** — keep result types; rewire to store.
+- **`ref.ts`** — refs are bare nanoid strings; resolver scoped by command namespace.
+- **`errors.ts`** — keep `NotFound`, `AlreadyExists`, `NothingToEdit`, `UnknownContext`. Drop `MalformedProject`, `InvalidSlug` (no slugs).
 - **`dates.ts`** — unchanged.
 
 ### `src/views/`
 - **`task.ts`** — adapt to new field names; drop shift-note rendering.
-- **`project.ts`** — adapt to new project shape.
+- **`project.ts`** — adapt to new project shape (now has its own `id`).
 - **`atoms.ts`** — unchanged.
 
 ### `src/commands/`
-- **`tasks.ts`** — folded into top-level commands (no `tasks` namespace).
-- **`projects.ts`** — `add`, `edit`, `complete`, `drop`, `reopen`.
-- **`ls.ts`** (new) — unified read command with `--tasks`/`--projects`/`--category`/`--project` filters.
-- **`show.ts`** (new) — polymorphic show by ref shape.
-- **`config.ts`** — keeps `set-data-dir` and `config` (print resolved config); drops `set-vault`.
-- **`list.ts`** — deleted (replaced by `ls.ts`).
+- **`list.ts`** — top-level dashboard (`todo list`).
+- **`tasks.ts`** — `list`, `show`, `add`, `edit`, `defer`, `activate`, `complete`, `drop`, `reopen`.
+- **`projects.ts`** — `list`, `show`, `add`, `edit`, `defer`, `activate`, `complete`, `drop`, `reopen`.
+- **`contexts.ts`** (new) — `list`, `add`, `remove`.
+- **`config.ts`** — `set-data-dir` and `config`.
 
 ### `src/cli.ts`
 - Drop `--vault` global flag, `set-vault` subcommand.
-- Add `set-data-dir <path>`, `config` (top-level).
-- Drop `tasks list`, `lists list`, top-level `list` (replaced by `ls`).
-- Drop `tasks <verb>` namespace; tasks verbs become top-level.
+- Add `set-data-dir <path>`, `config`, `contexts <verb>`.
+- Update top-level `list` (replaces existing markdown-era version).
+- Update `tasks <verb>`: drop `lane`-related args; add `defer`/`activate`/`drop`/`reopen`; drop `uncomplete` (use `reopen` instead).
+- Update `projects <verb>`: same set of verbs as tasks (`list`/`show`/`add`/`edit`/`defer`/`activate`/`complete`/`drop`/`reopen`).
 - Update tagline.
 
 ## Tests
 
-- **`tests/project.test.ts`** — gut and rewrite. Schema validation, ID assignment (max+1 in scope), state transitions, round-trip notes/contexts, context-registry enforcement. Drop all markdown-parser tests.
-- **`tests/cli.e2e.test.ts`** — survives mostly. Update commands (`tasks list` → `ls --tasks`, `projects show` → `show <slug>`, etc.), update on-disk reads to parse JSON, drop shift-advisory assertions.
-- **`tests/tasks.test.ts`** — adapt to field renames, drop lane references, drop shift assertions.
-- **`tests/ref.test.ts`** — handle `#<id>` (projectless) and `<slug>#<id>` resolution by id.
+- **`tests/project.test.ts`** — gut and rewrite. Schema validation, status transitions, round-trip notes/contexts, context-registry enforcement, nanoid generation. Drop all markdown-parser tests.
+- **`tests/cli.e2e.test.ts`** — survives mostly. Update commands to new surface (status flags on `list`, new verbs, project drill-down by ID), update on-disk reads to parse JSON, drop shift-advisory assertions.
+- **`tests/tasks.test.ts`** — adapt to field renames, status enum, drop lane references, drop shift assertions.
+- **`tests/ref.test.ts`** — refs are bare nanoids; lookup scoped by namespace.
 - **`tests/config.test.ts`** — rewrite for `set-data-dir` resolution (env > config > default).
 - **`tests/helpers.ts`** — `makeTempVault` → `makeTempDataDir`; sets `TODO_DATA_DIR`.
 - **`tests/dates.test.ts`** — unchanged.
@@ -250,24 +263,25 @@ The Projects section in `todo ls` shows only active, non-terminal projects. Inac
 ## Docs
 
 - **`README.md`** — rewrite. Drop "markdown / Obsidian / wikilinks" language. Show JSON example. Document `~/.todo/data/store.json` and `set-data-dir`.
-- **`docs/spec.md`** — rewrite. New storage section, JSON schema, ID rule, new CLI surface.
+- **`docs/spec.md`** — rewrite. New storage section, JSON schema, status enum, ID rule, new CLI surface.
 - **`docs/cli.md`** — update commands.
-- **`skill/SKILL.md`** — populate. Agent-facing docs: refs, ID rules, schema shape.
+- **`skill/SKILL.md`** — populate. Agent-facing docs: ref shape, status enum, schema, common flows.
 - **`docs/plans/task-status-and-notes-preamble.md`** and **`docs/plans/v0.2-implementation-sequence.md`** — leave as historical record.
 
 ## Order of work
 
-1. Schema + `core/store.ts` + minimum unit tests for I/O.
+1. Schema + `core/store.ts` + `core/config.ts` + minimum unit tests for I/O and config resolution.
 2. Mutators in `core/project.ts` on the new schema. Get `tests/tasks.test.ts` green.
-3. Update views and commands. Build `commands/ls.ts` and `commands/show.ts`. Wire up the new CLI surface.
+3. Wire up CLI namespaces (`tasks`, `projects`, `contexts`, top-level `list`/`config`). Update `cli.ts`.
 4. Update `tests/cli.e2e.test.ts` for new commands and JSON storage.
-5. Delete dead code: markdown parser/serializer, vault/config modules, shift rendering, `set-vault`/`--vault`, the dropped commands.
+5. Delete dead code: markdown parser/serializer, vault module, shift rendering, `set-vault`/`--vault`, `lane`-specific flags.
 6. Rewrite docs and `skill/SKILL.md`.
 7. `npm test`, manual smoke test.
 
 ## Out of scope
 
-- Migration from `.md` files. There is none. Old vaults are abandoned; the CLI no longer reads them.
-- Archive split (active/archive files). Deferred — single-file is fine for now; split when active.json grows uncomfortably large.
+- Migration from `.md` files. There is none. Old vaults are abandoned.
+- Archive split (active/archive files). Deferred — single-file is fine for now.
 - Backwards-compat flags or syntax.
 - Multiple data stores / vaults (only one data-dir at a time).
+- Multi-device merge logic. Nanoids prevent ID collisions but JSON-array merge on simultaneous offline edits is still out of scope; rely on a single writer at a time for now.
