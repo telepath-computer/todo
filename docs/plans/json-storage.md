@@ -601,11 +601,14 @@ todo: not found: NoSuchId                    # stderr; exit 1
 $ todo edit K3jLm9pQ
 todo: nothing to edit                        # stderr; exit 1
 
-$ todo add "Test" --active --waiting
-todo: --waiting is incompatible with --active/--deferred/--due
-
 $ todo add "Test"
-todo: --active or --deferred is required for action items
+todo: --active, --deferred, or --waiting is required
+
+$ todo add "Test" --active --waiting
+todo: --active, --deferred, --waiting are mutually exclusive (got 2)
+
+$ todo add "Test" --waiting --due 2026-05-01
+todo: --due is not allowed on waiting items
 ```
 
 The CLI never prints stack traces unless the error isn't a `DoError` (programmer bug — let it bubble).
@@ -624,13 +627,13 @@ todo show <id>                     # full entity (polymorphic)
 ### Item creation
 
 ```
-todo add "<title>" (--active | --deferred) [--project <id>] [--due <date>] [--note <text>]
-todo add "<title>" --waiting [--project <id>] [--note <text>]
+todo add "<title>" (--active | --deferred | --waiting) [--project <id>] [--due <date>] [--note <text>]
 ```
 
 Validation:
-- Default = action: requires exactly one of `--active | --deferred`. `--due` allowed.
-- `--waiting`: type = waiting. `--active`, `--deferred`, `--due` rejected.
+- **Exactly one** of `--active`, `--deferred`, or `--waiting` is required. Zero or more than one → error.
+- `--active` / `--deferred` → action item with `active` set accordingly. `--due` allowed.
+- `--waiting` → waiting item. `--due` is rejected.
 
 ### Item edit
 
