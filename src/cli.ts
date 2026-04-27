@@ -9,7 +9,7 @@ import {
   deferCmd,
   dropCmd,
 } from './commands/lifecycle.js'
-import { listCmd, listProjectsCmd } from './commands/list.js'
+import { listCmd } from './commands/list.js'
 import { addProjectCmd, editProjectCmd } from './commands/projects.js'
 import { showCmd } from './commands/show.js'
 import { DoError } from './core/errors.js'
@@ -100,13 +100,6 @@ program
   )
 
 const projects = program.command('projects').description('Manage projects')
-
-projects
-  .command('list')
-  .description('List active and deferred projects')
-  .action(() => {
-    run(() => listProjectsCmd())
-  })
 
 projects
   .command('add <title>')

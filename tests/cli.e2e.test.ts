@@ -49,11 +49,6 @@ type ListOutput = {
   deferred_projects?: Project[]
 }
 
-type ProjectsListOutput = {
-  active_projects: Project[]
-  deferred_projects: Project[]
-}
-
 let dataDir: string
 
 beforeEach(() => {
@@ -165,20 +160,6 @@ describe('todo list', () => {
     const r = cli('ls')
     assert.equal(r.code, 0)
     parseJson<ListOutput>(r.stdout) // doesn't throw
-  })
-})
-
-describe('todo projects list', () => {
-  it('lists active and deferred projects, excludes terminal', () => {
-    const a = addProject('Active 1')
-    const b = addProject('Deferred 1')
-    cli('defer', b.id)
-    const c = addProject('Done')
-    cli('complete', c.id)
-
-    const out = parseJson<ProjectsListOutput>(cli('projects', 'list').stdout)
-    assert.deepEqual(out.active_projects.map((p) => p.id), [a.id])
-    assert.deepEqual(out.deferred_projects.map((p) => p.id), [b.id])
   })
 })
 

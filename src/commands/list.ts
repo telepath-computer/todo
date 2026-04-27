@@ -23,12 +23,3 @@ export function listCmd(opts: { all?: boolean }): string {
   }
   return json(out)
 }
-
-export function listProjectsCmd(): string {
-  const { dataDir } = resolveDataDir()
-  const store = readStore(dataDir)
-  return json({
-    active_projects: activeProjects(store),
-    deferred_projects: deferredProjects(store),
-  })
-}
