@@ -6,9 +6,8 @@ Add the GTD "tickler" / scheduled-action capability: an action can be deferred
 *until* a specific date, after which it shows up on the dashboard automatically.
 
 Status enum stays 4-state (`active | deferred | completed | dropped`). Schedule
-is modeled as `status='deferred'` plus a non-null `start_at` field — the
-scheduled-ness is a *view* of deferred items with a future start, not a stored
-status.
+is modeled as `status='deferred'` plus a non-null `start_at` field — scheduled-
+ness is a *view* of deferred items with a future start, not a stored status.
 
 ## Schema
 
@@ -24,17 +23,18 @@ type ActionItem = BaseItem & {
 }
 ```
 
-Not added to `WaitingItem` or `ProjectList` (out of scope; see below).
+Not added to `WaitingItem` or `ProjectList`.
 
 ### Invariants
 
 - `start_at` is only non-null when `status === 'deferred'`.
-- `start_at` must be a future date at the moment it's set (past dates rejected
-  at write time; existing past `start_at` is allowed and just makes the item
-  effectively active in the bucket math).
-- `activate`, `defer`, `complete`, `drop` all clear `start_at` (mutators
-  set it to `null` as a side effect of changing status).
-- `schedule` sets `status='deferred'` and `start_at=<date>`.
+- Any mutator that changes status to `active`, `completed`, or `dropped`
+  also clears `start_at`.
+- `start_at` must be a strictly-future date (`> today`) at the moment it's
+  written. Past or same-day dates are rejected.
+- An older stored `start_at` that has since become past (e.g. set to Sept
+  and it's now Oct) is fine — the item just gets promoted into
+  `active_actions` by the bucket math.
 
 ### Three deferred kinds
 
@@ -46,53 +46,84 @@ Not added to `WaitingItem` or `ProjectList` (out of scope; see below).
 
 ## CLI surface
 
-The schema says "schedule = deferred + start_at". The CLI follows: `--start`
-is an optional modifier on `--deferred` / `defer`, not a separate mode or verb.
+The general-purpose mutation verb is `todo edit`. Status is set via
+`--active|--deferred|--completed|--dropped` flags (mutually exclusive, optional).
+The four lifecycle verbs (`activate`, `defer`, `complete`, `drop`) remain as
+common-path conveniences that desugar to `todo edit <id> --<status>`.
 
 ### `todo add action`
 
 ```
-todo add action --title "..." --active       [...]
-todo add action --title "..." --deferred [--start <date>] [...]
+todo add action --title "..." --active       [--project <id>] [--due <date>] [--note <text>]
+todo add action --title "..." --deferred [--start <date>] [--project ...] [--note ...]
 ```
 
-- `--active` and `--deferred` are mutually exclusive; exactly one required.
-- `--start <date>` valid only with `--deferred`. Combined with `--active` → reject.
-- `--start` parses YYYY-MM-DD or natural language via chrono.
-- `--start <past-date>` rejected with `start date must be in the future`.
+- Exactly one of `--active | --deferred` required.
+- `--start <date>` valid only with `--deferred`. With `--active` → reject.
+- `--start` parses YYYY-MM-DD or natural language via chrono; must resolve
+  to a strictly-future date.
+- `--start ""` is rejected on `add` (empty-string is for clearing on `edit`,
+  not for declaring on create).
 
-### Lifecycle (no new verbs; existing `defer` accepts `--start`)
-
-```
-todo activate <id>                   # status=active,   start_at=null, closed_at=null
-todo defer <id> [--start <date>]     # status=deferred, start_at=<date or null>, closed_at=null
-todo complete <id>                   # status=completed, closed_at=now,  start_at=null
-todo drop <id>                       # status=dropped,   closed_at=now,  start_at=null
-```
-
-- `defer` always sets `status='deferred'`. `--start` controls `start_at`:
-  present = scheduled-deferred, absent = open-ended deferred.
-- `defer` without `--start` clears any prior `start_at` (going from "until Sept 1"
-  to "open-ended someday").
-- `defer --start` only valid on actions. Projects/waiting still reject `defer`
-  with `--start` (same as today's `defer` rejection on waiting; projects accept
-  `defer` but not `--start`).
-
-### `todo edit <id>`
-
-`--start` becomes editable on actions:
+### `todo edit <id>` (the primitive)
 
 ```
-todo edit <id> [--title ...] [--note ...] [--due ...] [--project ...] [--start ...]
+todo edit <id> [--active | --deferred | --completed | --dropped]
+              [--start <date>]
+              [--title ...] [--note ...] [--due ...] [--project ...]
 ```
 
-- Setting `--start <date>` on an action implicitly transitions to `status='deferred'` if it isn't already.
-- `--start ""` clears `start_at` (does NOT change status).
-- `--start` rejected on projects and waiting (same as `--due`).
+Field semantics:
+- `--note ""` / `--due ""` / `--project ""` clear the field (existing behavior).
+- `--start ""` clears `start_at` (no status change).
+- `--start <date>` on an action sets `start_at` and **implicitly transitions
+  `status` to `deferred`** (regardless of current status: active, deferred,
+  or terminal). On a terminal action this also clears `closed_at` — the
+  agent's intent to schedule overrides the closed state.
+- `--start` is rejected on projects and waiting items.
 
-Open question: should `--start <date>` on an `active` action force it to `deferred`? Or should we reject and require explicit `todo schedule`? **Default: implicit transition** — keeps `edit` as a single point for tweaking item fields. The agent that sets a future `--start` clearly wants the item scheduled.
+Status semantics:
+- At most one of `--active|--deferred|--completed|--dropped`.
+- `--active`, `--deferred`, `--completed`, `--dropped` set status; mutators
+  clear `start_at` and `closed_at` as appropriate (per the lifecycle table
+  below).
+- `--deferred --start <date>` is the explicit "schedule" call.
+- `--active --start <date>` rejected (contradiction).
+- `--completed --start ...` / `--dropped --start ...` rejected (terminal +
+  schedule is meaningless).
+- Empty patch (no flags) → `nothing to edit`.
+
+### Lifecycle convenience verbs
+
+Each verb is a 1:1 alias for `todo edit <id> --<status>`. Same validation
+rules, same entity-type checks.
+
+```
+todo activate <id>                   # ≡ edit <id> --active
+todo defer <id> [--start <date>]     # ≡ edit <id> --deferred [--start <date>]
+todo complete <id>                   # ≡ edit <id> --completed
+todo drop <id>                       # ≡ edit <id> --dropped
+```
+
+Lifecycle effects table (applies to both surfaces):
+
+| transition | status | closed_at | start_at |
+|---|---|---|---|
+| `--active` / `activate` | `active` | cleared | cleared |
+| `--deferred` (no `--start`) / `defer` | `deferred` | cleared | cleared |
+| `--deferred --start <d>` / `defer --start <d>` | `deferred` | cleared | `<d>` |
+| `--completed` / `complete` | `completed` | `now` | cleared |
+| `--dropped` / `drop` | `dropped` | `now` | cleared |
+
+Entity-type rules:
+- `--active` and `--deferred` rejected on waiting items (no active/deferred
+  distinction; no resurrection).
+- `--start` rejected on projects and waiting items.
+- `--completed` / `--dropped` valid on all three entity types.
 
 ## Bucket math
+
+Comparison is against `todayLocal()` (host timezone, `YYYY-MM-DD`):
 
 ```
 active_actions    = type=action ∧ (
@@ -117,66 +148,159 @@ todo list             # { active_actions, waiting, active_projects }
 todo list --all       # also { scheduled_actions, deferred_actions, deferred_projects }
 ```
 
-`scheduled_actions` is new under `--all`. `active_actions` automatically includes any past-due scheduled items (they "drop into" the dashboard once their `start_at` arrives).
+`scheduled_actions` is the new bucket under `--all`. `active_actions` auto-
+includes any past-due scheduled items.
+
+## Hardening / edge cases
+
+### Timezone
+
+- `start_at` is `YYYY-MM-DD` (date-only, no time, no TZ).
+- "Today" comparisons use the host's local timezone via `todayLocal()`.
+- A v0.4 binary running in a different TZ from the writer can disagree on
+  whether `start_at='2026-09-01'` is past/future at the boundary. Acceptable;
+  match `--due`'s existing semantics.
+
+### Date parsing
+
+- `--start today` → resolves to today's date → rejected (`> today` required).
+- `--start tomorrow` → tomorrow's date → accepted.
+- `--start <past-natural-language>` (e.g. "yesterday") → rejected.
+- `--start ""` semantics:
+  - On `add` and `defer`: **rejected**. `""` is a clear gesture; nothing to clear at create time, and `defer` without `--start` already means "no start."
+  - On `edit`: **clears** `start_at` to null. Status unchanged.
+- Invalid input (chrono returns null) → `could not parse date: <input>` (existing).
+
+### Schema compatibility (v0.3 → v0.4)
+
+Stores written by v0.3 don't have `start_at` on actions. `readStore`
+normalizes on read: any action missing `start_at` gets `start_at: null`
+filled in. No migration commit is needed — the next `writeStore` rewrites
+the file with the field populated. Mutators and bucket helpers see strict
+`string | null` and stay simple.
+
+### Invariant tolerance
+
+A hand-edit could produce `status='active', start_at='2026-09-01'`. The
+bucket helpers don't crash — `active_actions` includes status='active'
+without consulting `start_at`, so the orphan `start_at` is just ignored.
+Don't auto-normalize on read; the mutator path is the source of truth.
+
+### `--due` vs `--start` collision
+
+An action could have `due='2026-05-01'` and `start_at='2026-09-01'`
+(active starting after the deadline). Nonsensical but not corrupting.
+No write-time validation; surfaceable to the agent if they care.
+
+### Error message ordering
+
+When multiple validation rules fail (e.g. `defer <project-id> --start <past>`),
+**check the entity-type rule first** ("`--start` not allowed on projects"),
+then the date-validity rule. Type rejections are clearer than date rejections.
+
+## Errors
+
+New entries in the catalog (in addition to existing):
+
+```
+start date must be in the future                      (resolved date <= today)
+--start requires --deferred                            (add action --start without --deferred; or edit --active --start)
+--start is not allowed on projects                     (defer/edit a project with --start)
+--start is not allowed on waiting items                (defer/edit a waiting item with --start)
+--start is not allowed with --completed / --dropped    (terminal + schedule contradiction)
+```
 
 ## Code changes
 
 ### `src/core/model.ts`
 - Add `start_at: string | null` to `ActionItem`.
-- New mutator `setSchedule(s, id, start_at)`:
-  - Find action, throw if entity is not an action.
-  - Validate `start_at` is a future date — but: validation belongs at the CLI boundary (`commands/lifecycle.ts`), not the pure mutator. The mutator just stores it.
-  - Set `status='deferred'`, `start_at=<date>`, `closed_at=null`.
 - Update `setStatus`:
-  - When transitioning to `active` / `deferred` / `completed` / `dropped`, also clear `start_at`.
+  - Transitions to `active`/`completed`/`dropped` clear `start_at`.
+  - Transitions to `deferred` accept an optional `start_at` parameter; if
+    omitted, `start_at` is cleared.
 - Update bucket helpers:
-  - `liveActions` — include the past-due scheduled bridge.
+  - `liveActions(s, today)` — includes the past-due scheduled bridge.
   - New `scheduledActions(s, today)`.
-  - `deferredActions` — narrow to `start_at=null`.
-- Update `addAction` to accept optional `start_at` input.
+  - `deferredActions(s)` — narrow to `start_at = null`.
+- Update `addAction` to accept optional `start_at`.
+
+### `src/core/store.ts`
+- `readStore` normalizes: any action missing `start_at` gets `start_at: null`.
 
 ### `src/core/dates.ts`
-- New helper `requireFutureDate(input, ref)` that wraps `resolveDueInput` and throws `InvalidArgument` if the resolved date is `<= today`.
+- New helper `requireFutureDate(input, ref)` — wraps `resolveDueInput`,
+  throws `InvalidArgument('start date must be in the future')` if `<= today`.
+- New helper `todayLocal()` — returns `YYYY-MM-DD` in local TZ.
 
 ### `src/commands/add.ts`
-- `addActionCmd` opts add `start?: string`.
-- Validation: exactly one of `active | deferred | start` required.
-- If `start`: parse via `requireFutureDate`, call `addAction` with `status='deferred'`, `start_at=<resolved>`.
-
-### `src/commands/lifecycle.ts`
-- `deferCmd` accepts optional `start?: string`. Parse via `requireFutureDate`,
-  pass through to `setStatus` (or a new `setDeferred(s, id, start_at)`
-  shorthand on the model).
+- `addActionCmd` opts add `start?: string`. Validate `--start` requires
+  `--deferred`; reject with `--active`. Parse via `requireFutureDate`.
 
 ### `src/commands/edit.ts`
-- Accept `--start`. On action: parse via `requireFutureDate` (or `null` if `""`), set `start_at` and (if non-null) flip `status='deferred'`.
-- Reject on projects/waiting.
+- Accept `--active|--deferred|--completed|--dropped` (mutually exclusive)
+  and `--start`. Dispatch:
+  - Status flag → call `setStatus` (with optional `start_at` if
+    `--deferred --start <d>`).
+  - `--start` alone → call `setStatus(s, id, 'deferred', start_at)` for
+    actions; reject on projects/waiting.
+  - Field flags → `editItem`/`editList` as today.
+- Action edits can mix field flags with status flag in one call.
+
+### `src/commands/lifecycle.ts`
+- `activateCmd`, `deferCmd(start?)`, `completeCmd`, `dropCmd` thin wrappers
+  that funnel into the same model mutators as `editCmd` does.
 
 ### `src/commands/list.ts`
-- `listCmd` `--all` adds `scheduled_actions` to the output.
+- `listCmd` `--all` adds `scheduled_actions`.
 
 ### `src/cli.ts`
-- `add action` gains optional `--start <date>` (only valid with `--deferred`).
-- `defer <id>` gains optional `--start <date>`.
-- `edit <id>` gains optional `--start <date>` (action-only; implicit transition
-  to `status='deferred'`).
+- `add action --deferred [--start <date>]`.
+- `edit <id>` gains all four status flags + `--start`.
+- `defer <id> [--start <date>]`.
+- All flags surface in `--help`.
 
 ## Tests
 
-- **`tests/model.test.ts`**: bucket-helper splits (active vs scheduled vs deferred) by `start_at`; mutators clear/set `start_at`; `setSchedule` rejects non-actions.
-- **`tests/cli.e2e.test.ts`**: `add action --start`, `todo schedule <id> --start`, `todo edit --start`, past-date rejection, scheduled-action with past start auto-appears in `active_actions`, `--all` surfaces `scheduled_actions`, `defer` clears a previously-scheduled `start_at`.
+- **`tests/model.test.ts`**:
+  - Bucket-helper splits (active vs scheduled vs deferred) by `start_at`.
+  - `setStatus` clears `start_at` on transitions to `active`/terminal.
+  - `setStatus` to `deferred` with optional `start_at`.
+  - `addAction` with `start_at`.
+- **`tests/store.test.ts`**: `readStore` normalizes missing `start_at` to null
+  on a hand-written v0.3 store.
+- **`tests/dates.test.ts`**: `requireFutureDate` rejects today / past;
+  accepts tomorrow / future natural language. `todayLocal()` format check.
+- **`tests/cli.e2e.test.ts`**:
+  - `add action --deferred --start <future>` — happy path.
+  - `add action --active --start <date>` → reject.
+  - `add action --start <date>` (no `--deferred`) → reject.
+  - `add action --deferred --start today` → reject.
+  - `add action --deferred --start ""` → reject.
+  - `defer <id> --start <future>` and `edit <id> --deferred --start <future>` produce the same entity.
+  - `edit <id> --start <future>` on active action → status flips to deferred.
+  - `edit <id> --start <future>` on terminal action → status flips to deferred, closed_at cleared.
+  - `edit <id> --start ""` clears start_at, leaves status alone.
+  - `edit <id> --active --start <date>` → reject.
+  - `edit <id> --completed --start <date>` → reject.
+  - `defer <id>` (no `--start`) clears any prior `start_at`.
+  - `--all` surfaces `scheduled_actions`.
+  - Past-due scheduled item appears in `active_actions` (parent active).
+  - Parent project deferred → child scheduled hidden from both `active_actions` and `scheduled_actions`.
+  - v0.3-shaped action (no `start_at` field) reads cleanly.
 
 ## Docs
 
-- **`README.md`** — update example to mention scheduling once.
-- **`docs/spec.md`** — schema (add `start_at`), bucket filters, validation, errors.
-- **`docs/architecture.md`** — bucket-helper layer change.
+- **`README.md`** — extend example to show `--deferred --start tomorrow`.
+- **`docs/spec.md`** — schema (`start_at`), bucket filters, edit semantics,
+  error catalog.
+- **`docs/architecture.md`** — note `readStore` normalization,
+  `requireFutureDate` and `todayLocal` helpers.
 
 ## Order of work
 
-1. Schema + mutators + bucket helpers + model tests.
-2. Date helper (`requireFutureDate`) + dates tests.
-3. CLI: `add action --start`, `todo schedule`, `todo edit --start`, list output.
+1. Schema + `readStore` normalization + model mutators + bucket helpers + model tests.
+2. Date helpers (`requireFutureDate`, `todayLocal`) + tests.
+3. CLI: `add action --deferred --start`, `edit` status+start, `defer --start`, list output.
 4. e2e tests.
 5. Doc refresh.
 6. Bump version → 0.4.0. Publish.
@@ -184,14 +308,14 @@ todo list --all       # also { scheduled_actions, deferred_actions, deferred_pro
 ## Out of scope
 
 - `start_at` on projects. A project starting on a date is a real GTD use case
-  (don't think about Q4 launch until Q3 ends), but adding it is a parallel
-  decision; ship action scheduling first.
-- `start_at` on waiting items. Waiting has no "active vs deferred" distinction;
+  (don't think about Q4 launch until Q3 ends), but parallel decision; ship
+  action scheduling first.
+- `start_at` on waiting items. Waiting has no active/deferred distinction;
   scheduling doesn't fit.
-- Recurrence / repeating items (`every monday`, `monthly`). Distinct concept.
+- Recurrence (`every monday`, `monthly`). Distinct concept.
 - Auto-flipping stored status when `start_at` passes (background daemon, cron,
   on-read mutation). Stored status stays `'deferred'`; bucket math is the
   source of effective state.
-- Time-of-day on `start_at`. Date-only (`YYYY-MM-DD`), matching `due`.
-- "Started but not yet active" intermediate state. If you set start_at to
-  the past, the item is effectively active by bucket math; that's enough.
+- Time-of-day on `start_at`. Date-only.
+- Atomic `--start` adjustment via the convenience verbs other than `defer`.
+  (e.g. `todo activate <id> --start <date>` not supported; use `edit`.)
