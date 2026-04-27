@@ -147,7 +147,6 @@ $ todo list
 
 - [docs/spec.md](docs/spec.md) — entity schema, storage layout, CLI surface, semantics.
 - [docs/architecture.md](docs/architecture.md) — implementation notes (modules, layer rules, conventions).
-- [skill/SKILL.md](skill/SKILL.md) — agent-facing usage guide.
 
 ## License
 
