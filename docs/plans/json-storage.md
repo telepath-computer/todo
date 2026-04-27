@@ -118,12 +118,14 @@ todo show <ref>                        # polymorphic — show a task or a projec
 ```
 todo add "<title>" [--project <slug>] [--tag <tag>]... [--due <date>] [--note <text>] [--available true|false]
 todo edit <ref>    [--title ...] [--project ...] [--tag <tag>]... [--due ...] [--note ...] [--available true|false]
+todo defer <ref>                       # sets available=false (someday)
+todo activate <ref>                    # sets available=true (next action)
 todo complete <ref>                    # sets completed=now, clears dropped
 todo drop <ref>                        # sets dropped=now, clears completed
 todo reopen <ref>                      # clears completed and dropped
 ```
 
-`--available` defaults to `true` on `add`; pass `--available false` to file directly as someday.
+`--available` defaults to `true` on `add`; pass `--available false` to file directly as someday. `defer`/`activate` are convenience verbs for flipping availability on existing tasks (parallel to `complete`/`reopen`).
 
 `--tag` is repeatable on `add` (initial set). On `edit`, repeated `--tag` flags **replace** the entire set; pass `--tag ""` once to clear.
 
