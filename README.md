@@ -16,15 +16,19 @@ The binary is `todo`.
 
 Three entity types, all stored together in one JSON file:
 
-| Type | When to use | Lifecycle |
+| Type | When to use | Status values |
 |---|---|---|
 | **project** | A multi-action outcome you're engaged with (or paused on). | active ↔ deferred → completed / dropped |
 | **action** | A concrete next action you can do. | active (next) ↔ deferred (someday/maybe) → completed / dropped |
-| **waiting** | Something you're waiting on someone else for. | live → completed / dropped (no resurrection) |
+| **waiting** | Something you're waiting on someone else for. | active → completed / dropped (no resurrection) |
 
 Every entity gets a stable 8-char nanoid (e.g. `Vh8XLm2k`). IDs never shift on
 mutation and are never reused. Every command that takes `<id>` accepts any
 entity id; the CLI looks up across projects and items.
+
+Each entity has `status` (one of `active`, `deferred`, `completed`, `dropped` —
+waiting items can't be `deferred`) and `closed_at` (ISO timestamp; non-null
+iff status is completed or dropped).
 
 ## Storage
 
@@ -48,56 +52,47 @@ rename — safe to commit, sync via Dropbox/iCloud, or hand-edit.
 
 ## CLI
 
-13 commands, JSON-only output. Errors go to stderr with non-zero exit.
+12 commands, JSON-only output. Errors go to stderr with non-zero exit.
 
 ### Reads
 
 ```
 todo list                 # { active_actions, waiting, active_projects }
 todo list --all           # also { deferred_actions, deferred_projects }
-todo projects list        # { active_projects, deferred_projects }
 todo show <id>            # full canonical entity
 ```
 
-### Item creation
+### Create (verb-first)
 
 ```
-todo add "<title>" --active   [--project <id>] [--due <date>] [--note <text>]
-todo add "<title>" --deferred [--project <id>] [--due <date>] [--note <text>]
-todo add "<title>" --waiting  [--project <id>] [--note <text>]
+todo add project --title "..." [--note <text>]
+todo add action  --title "..." (--active | --deferred) [--project <id>] [--due <date>] [--note <text>]
+todo add waiting --title "..." [--project <id>] [--note <text>]
 ```
 
-Exactly one of `--active`, `--deferred`, `--waiting` is required.
 `--due` accepts `YYYY-MM-DD` or natural language (`tomorrow`, `next friday`).
 
-### Item edit
+### Edit (polymorphic on id)
 
 ```
 todo edit <id> [--title ...] [--note ...] [--due ...] [--project ...]
 ```
 
-Pass `""` to clear an optional field: `--note ""`, `--due ""`, `--project ""`.
-`--due` is rejected on waiting items.
-
-### Project creation / edit
-
-```
-todo projects add --title "<text>" [--note <text>]
-todo projects edit <id> [--title ...] [--note ...]
-```
+Pass `""` to clear an optional field. `--due` is rejected on projects and
+waiting items. `--project` is rejected on projects.
 
 ### Lifecycle (polymorphic on id)
 
 ```
-todo activate <id>        # active=true; clears completed/dropped
-todo defer <id>           # active=false; clears completed/dropped
-todo complete <id>        # completed=now, dropped=null
-todo drop <id>            # dropped=now, completed=null
+todo activate <id>        # status=active;    clears closed_at
+todo defer <id>           # status=deferred;  clears closed_at
+todo complete <id>        # status=completed; closed_at=now
+todo drop <id>            # status=dropped;   closed_at=now
 ```
 
-`activate`/`defer` reject waiting items (no `active` flag). To bring a
-completed/dropped action or project back to a live state, use `activate` or
-`defer` — both clear the terminal fields. There is no `reopen` verb.
+`activate`/`defer` reject waiting items (waiting has no `deferred` state and
+no resurrection path). To bring a completed/dropped action or project back to
+a live state, use `activate` or `defer` — both clear the terminal fields.
 
 ### Configuration
 
@@ -109,28 +104,26 @@ todo config                      # prints { dataDir, source }
 ## Example
 
 ```
-$ todo projects add --title "Telepath" --note "Indie tool"
+$ todo add project --title "Telepath" --note "Indie tool"
 {
-  "active": true,
-  "completed": null,
-  "created": "2026-04-27T11:10:00Z",
-  "dropped": null,
+  "closed_at": null,
+  "created_at": "2026-04-27T11:10:00Z",
   "id": "Vh8XLm2k",
   "note": "Indie tool",
+  "status": "active",
   "title": "Telepath",
   "type": "project"
 }
 
-$ todo add "Find guests" --active --project Vh8XLm2k --due tomorrow
+$ todo add action --title "Find guests" --active --project Vh8XLm2k --due tomorrow
 {
-  "active": true,
-  "completed": null,
-  "created": "2026-04-27T11:11:00Z",
+  "closed_at": null,
+  "created_at": "2026-04-27T11:11:00Z",
   "due": "2026-04-28",
-  "dropped": null,
   "id": "K3jLm9pQ",
-  "list": "Vh8XLm2k",
   "note": null,
+  "project": "Vh8XLm2k",
+  "status": "active",
   "title": "Find guests",
   "type": "action"
 }

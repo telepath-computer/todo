@@ -23,12 +23,11 @@ Three layers, no view layer (storage shape == display shape):
 src/
 ├── cli.ts                 commander wiring
 ├── commands/              thin glue: parse args → call model → persist → JSON.stringify
-│   ├── add.ts
+│   ├── add.ts             addProjectCmd / addActionCmd / addWaitingCmd
 │   ├── config.ts          set-data-dir / config
-│   ├── edit.ts
-│   ├── lifecycle.ts       activate/defer/complete/drop
-│   ├── list.ts            todo list / projects list
-│   ├── projects.ts        projects add/edit
+│   ├── edit.ts            polymorphic on entity (project / action / waiting)
+│   ├── lifecycle.ts       activate / defer / complete / drop
+│   ├── list.ts            todo list (with --all)
 │   ├── shared.ts          json() helper
 │   └── show.ts
 └── core/
@@ -47,7 +46,7 @@ src/
   so the CLI surfaces a clean message instead of a stack trace.
 - **`model.ts`** is pure. No I/O, no `Date.now()`, no `process.env`. Mutators
   take the current `Store` and an input that includes any non-deterministic
-  values (`id`, `created`, `ts`); they return `{ store, entity }`. Validators
+  values (`id`, `created_at`, `ts`); they return `{ store, entity }`. Validators
   throw typed errors. Bucket helpers (`liveActions`, `deferredActions`,
   `liveWaiting`, `activeProjects`, `deferredProjects`) implement filter rules
   including parent-state cascade.

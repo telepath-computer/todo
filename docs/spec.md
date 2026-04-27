@@ -31,26 +31,24 @@ JSON-only output.
 {
   "lists": [
     {
-      "active": true,
-      "completed": null,
-      "created": "2026-04-27T10:14:00Z",
-      "dropped": null,
+      "closed_at": null,
+      "created_at": "2026-04-27T10:14:00Z",
       "id": "Vh8XLm2k",
       "note": "Indie thinking tool.",
+      "status": "active",
       "title": "Telepath",
       "type": "project"
     }
   ],
   "items": [
     {
-      "active": true,
-      "completed": null,
-      "created": "2026-04-27T10:14:32Z",
+      "closed_at": null,
+      "created_at": "2026-04-27T10:14:32Z",
       "due": "2026-05-01",
-      "dropped": null,
       "id": "K3jLm9pQ",
-      "list": "Vh8XLm2k",
       "note": null,
+      "project": "Vh8XLm2k",
+      "status": "active",
       "title": "Find guests",
       "type": "action"
     }
@@ -63,42 +61,43 @@ JSON-only output.
 Discriminated subtypes — each entity carries only the fields it actually has.
 
 ```typescript
+type Status = 'active' | 'deferred' | 'completed' | 'dropped'
+type WaitingStatus = Exclude<Status, 'deferred'>   // 'active' | 'completed' | 'dropped'
+
 type BaseList = {
   id: string                   // 8-char nanoid
   title: string                // non-empty
   note: string | null
-  created: string              // ISO 8601, set on insert, never edited
+  created_at: string           // ISO 8601, set on insert, never edited
 }
 
 type ProjectList = BaseList & {
   type: 'project'
-  active: boolean              // false = deferred (paused)
-  completed: string | null     // ISO; mutually exclusive with dropped
-  dropped: string | null
+  status: Status
+  closed_at: string | null     // ISO; non-null iff status is completed/dropped
 }
 
 type List = ProjectList         // future: more list subtypes
 
 type BaseItem = {
   id: string
-  list: string | null          // parent project id; null = standalone
+  project: string | null       // parent project id; null = standalone
   title: string
   note: string | null
-  created: string
+  created_at: string
 }
 
 type ActionItem = BaseItem & {
   type: 'action'
-  active: boolean              // false = deferred (someday/maybe)
+  status: Status
   due: string | null           // YYYY-MM-DD
-  completed: string | null
-  dropped: string | null
+  closed_at: string | null
 }
 
 type WaitingItem = BaseItem & {
   type: 'waiting'
-  completed: string | null
-  dropped: string | null
+  status: WaitingStatus        // no 'deferred' for waiting
+  closed_at: string | null
 }
 
 type Item = ActionItem | WaitingItem
@@ -108,10 +107,10 @@ type Store = { lists: List[]; items: Item[] }
 
 ### Invariants
 
-- `completed` and `dropped` are mutually exclusive: at most one is non-null.
-- `WaitingItem` has no `active` flag; it's either live or terminal.
-- `Item.list` references an existing `List.id` or is `null`.
-- `created` is set once on insert, never edited.
+- `closed_at` is non-null iff `status` is `completed` or `dropped`.
+- `WaitingItem.status` excludes `'deferred'`; only `active`, `completed`, `dropped`.
+- `Item.project` references an existing `List.id` or is `null`.
+- `created_at` is set once on insert, never edited.
 - `id` is set once on insert, never reused, never edited.
 - Title is non-empty (whitespace-only rejected).
 
@@ -124,7 +123,7 @@ up across both `lists` and `items`.
 
 ## CLI surface
 
-13 commands. JSON-only output. Errors are plain text on stderr with non-zero exit.
+12 commands. JSON-only output. Errors are plain text on stderr with non-zero exit.
 
 ### Reads
 
@@ -132,35 +131,38 @@ up across both `lists` and `items`.
 |---|---|
 | `todo list` | `{ active_actions, waiting, active_projects }` |
 | `todo list --all` | also `{ deferred_actions, deferred_projects }` |
-| `todo projects list` | `{ active_projects, deferred_projects }` |
 | `todo show <id>` | the canonical entity |
 
 **Bucket filters:**
 
-- `active_actions`: `type=action && active=true && !terminal && parent.active=true` (or no parent).
-- `deferred_actions`: `active=false && !terminal && parent.active=true`.
-- `waiting`: `type=waiting && !terminal && parent.active=true`.
-- `active_projects`: `type=project && active=true && !terminal`.
-- `deferred_projects`: `type=project && active=false && !terminal`.
+- `active_actions`: `type=action && status=active && parent.status=active` (or no parent).
+- `deferred_actions`: `status=deferred && parent.status=active` (or no parent).
+- `waiting`: `type=waiting && status=active && parent.status=active` (or no parent).
+- `active_projects`: `type=project && status=active`.
+- `deferred_projects`: `type=project && status=deferred`.
 
 Children of a deferred or terminal project are hidden from `todo list`. Inspect
 them via `todo show <id>` directly. Terminal items are intentionally not
 surfaced in any list view; query by id.
 
-### Item creation
+### Create
+
+Verb-first: `todo add <type> --title "..." [type-specific flags]`.
 
 ```
-todo add "<title>" (--active | --deferred | --waiting)
-                   [--project <id>] [--due <date>] [--note <text>]
+todo add project --title "<text>" [--note <text>]
+todo add action  --title "<text>" (--active | --deferred)
+                                  [--project <id>] [--due <date>] [--note <text>]
+todo add waiting --title "<text>" [--project <id>] [--note <text>]
 ```
 
-- Exactly one of `--active`, `--deferred`, `--waiting` is required.
-- `--active` / `--deferred` create an `ActionItem` with `active` set accordingly.
-- `--waiting` creates a `WaitingItem`. `--due` is rejected.
-- `--due` accepts `YYYY-MM-DD` or natural language (`tomorrow`, `next friday`).
+- `add project` creates a `ProjectList` at `status=active`.
+- `add action` requires exactly one of `--active` / `--deferred`. `--due`
+  accepts `YYYY-MM-DD` or natural language (`tomorrow`, `next friday`).
+- `add waiting` creates a `WaitingItem` at `status=active`. No `--due`.
 - `--project <id>` must reference an existing project.
 
-### Item edit
+### Edit (polymorphic on id)
 
 ```
 todo edit <id> [--title ...] [--note ...] [--due ...] [--project ...]
@@ -169,35 +171,24 @@ todo edit <id> [--title ...] [--note ...] [--due ...] [--project ...]
 - Omit a flag to leave the field unchanged.
 - Pass `""` to clear: `--note ""`, `--due ""`, `--project ""`.
 - `--title ""` is rejected (title is required).
-- `--due ""` and `--due <date>` are rejected on waiting items.
+- `--due` is rejected on projects and waiting items.
+- `--project` is rejected on projects.
 - Empty patch (no flags) → error: `nothing to edit`.
 
-### Project creation / edit
+### Lifecycle (polymorphic on id)
 
 ```
-todo projects add --title "<text>" [--note <text>]
-todo projects edit <id> [--title ...] [--note ...]
+todo activate <id>     # status=active,    closed_at=null
+todo defer <id>        # status=deferred,  closed_at=null
+todo complete <id>     # status=completed, closed_at=now
+todo drop <id>         # status=dropped,   closed_at=now
 ```
 
-Same `""` clearing convention applies to `--note`.
-
-### Lifecycle
-
-Polymorphic on `<id>` — accepts any project, action, or waiting id.
-
-```
-todo activate <id>     # active=true, completed=null, dropped=null
-todo defer <id>        # active=false, completed=null, dropped=null
-todo complete <id>     # completed=now, dropped=null
-todo drop <id>         # dropped=now, completed=null
-```
-
-- `activate` and `defer` reject waiting items (no `active` flag).
+- `activate` and `defer` reject waiting items (waiting has no `deferred`
+  state and no resurrection path; terminal waiting items stay terminal).
 - `activate`/`defer` are also how you bring a completed/dropped action or
-  project back to a live state — they clear the terminal fields. There is no
+  project back to a live state — they clear `closed_at`. There is no
   `reopen` verb.
-- Waiting items have no resurrection path. Once terminal, they stay terminal;
-  to track a fresh ask, create a new waiting item.
 
 ### Configuration
 
@@ -225,11 +216,13 @@ Plain text on stderr, prefixed with `todo:`, exit code 1.
 |---|---|
 | `not found: <id>` | unknown nanoid |
 | `nothing to edit` | edit with no patch fields |
-| `--active, --deferred, or --waiting is required` | mode flag missing on `add` |
-| `--active, --deferred, --waiting are mutually exclusive (got N)` | multiple modes |
-| `--due is not allowed on waiting items` | waiting + `--due` |
+| `--active or --deferred is required for actions` | `add action` without a status flag |
+| `--active and --deferred are mutually exclusive` | both passed to `add action` |
+| `--due is not allowed on waiting items` | edit waiting with `--due` |
+| `--due is not allowed on projects` | edit project with `--due` |
+| `--project is not allowed on projects` | edit project with `--project` |
 | `unknown project: <id>` | parent ref doesn't resolve |
-| `cannot activate waiting item <id> (no active flag)` | waiting + `activate`/`defer` |
+| `cannot activate waiting item <id> (...)` | `activate`/`defer` on a waiting item |
 | `data dir must be an absolute path (...)` | relative path in env or config |
 | `malformed store.json at ...` | file present but not parseable JSON |
 | `could not parse date: <input>` | unparseable `--due` |
