@@ -111,13 +111,17 @@ The four statuses are mutually exclusive. `closed` is set to the timestamp of th
 
 ## Visibility / cascade rules
 
-A task surfaces in the default `todo tasks list` and `todo list` if **all** of:
-- `task.status === "actionable"`
-- Either `task.project === null` OR `project.status === "actionable"`
+**Top-level `todo list` (dashboard):** focused on actionable.
+- Task: `task.status === "actionable" && (project === null OR project.status === "actionable")`
+- Project: `project.status === "actionable"`
+- `--all` widens to include `status === "deferred"` for both.
 
-A project surfaces in default views if `project.status === "actionable"`.
+**`todo tasks list` and `todo projects list`:** scoped views show the open set by default.
+- Default: `status === "actionable" || status === "deferred"`
+- `--completed`: `status === "completed"`
+- `--dropped`: `status === "dropped"`
 
-`--all` widens to include `status === "deferred"`. `--completed` and `--dropped` show those terminal sets explicitly.
+Cross-cutting cascade from project status only applies to the dashboard (`todo list`); namespaced `tasks list` shows tasks based on their own status regardless of their project's status (you can still see deferred tasks in inactive projects via `tasks list`).
 
 ## CLI surface
 
@@ -127,14 +131,12 @@ A project surfaces in default views if `project.status === "actionable"`.
 todo list                              # cross-cutting dashboard: actionable tasks + projects
 todo list --all                        # also include deferred
 
-todo tasks list                        # actionable tasks
-todo tasks list --all                  # actionable + deferred
+todo tasks list                        # actionable + deferred (the open set)
 todo tasks list --completed            # completed tasks
 todo tasks list --dropped              # dropped tasks
 todo tasks show <id>                   # task detail
 
-todo projects list                     # actionable projects
-todo projects list --all               # actionable + deferred
+todo projects list                     # actionable + deferred
 todo projects list --completed         # completed projects
 todo projects list --dropped           # dropped projects
 todo projects show <id>                # project drill-down (all its tasks regardless of status)
