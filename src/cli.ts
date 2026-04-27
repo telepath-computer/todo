@@ -109,12 +109,11 @@ projects
   })
 
 projects
-  .command('add')
+  .command('add <title>')
   .description('Create a new project')
-  .requiredOption('--title <text>', 'project title')
   .option('--note <text>', 'attach a note')
-  .action((opts: { title: string; note?: string }) => {
-    run(() => addProjectCmd(opts))
+  .action((title: string, opts: { note?: string }) => {
+    run(() => addProjectCmd({ title, note: opts.note }))
   })
 
 projects

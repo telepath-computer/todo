@@ -5,6 +5,8 @@ import { json } from './shared.js'
 
 export type AddProjectOpts = { title: string; note?: string }
 
+
+
 export function addProjectCmd(opts: AddProjectOpts): string {
   const { dataDir } = resolveDataDir()
   const store = readStore(dataDir)

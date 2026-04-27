@@ -14,12 +14,11 @@ import {
   findEntity,
   findItem,
   findList,
+  isTerminal,
   liveActions,
   liveWaiting,
   resolveRef,
-  setActive,
-  setCompleted,
-  setDropped,
+  setStatus,
   type ActionItem,
   type ProjectList,
   type Store,
@@ -32,15 +31,24 @@ function seed(): Store {
   let s: Store = EMPTY_STORE
   s = addProject(s, { id: 'P1', created: T0, title: 'Proj A' }).store
   s = addProject(s, { id: 'P2', created: T0, title: 'Proj B' }).store
-  s = addAction(s, { id: 'A1', created: T0, title: 'A1 task', active: true, list: 'P1' }).store
-  s = addAction(s, { id: 'A2', created: T0, title: 'A2 task', active: false, list: 'P1' }).store
-  s = addAction(s, { id: 'A3', created: T0, title: 'standalone', active: true, list: null }).store
-  s = addWaiting(s, { id: 'W1', created: T0, title: 'cover art', list: 'P1' }).store
+  s = addAction(s, { id: 'A1', created: T0, title: 'A1 task', status: 'active', project: 'P1' }).store
+  s = addAction(s, { id: 'A2', created: T0, title: 'A2 task', status: 'deferred', project: 'P1' }).store
+  s = addAction(s, { id: 'A3', created: T0, title: 'standalone', status: 'active', project: null }).store
+  s = addWaiting(s, { id: 'W1', created: T0, title: 'cover art', project: 'P1' }).store
   return s
 }
 
+describe('isTerminal', () => {
+  it('returns true for completed/dropped, false otherwise', () => {
+    assert.equal(isTerminal('active'), false)
+    assert.equal(isTerminal('deferred'), false)
+    assert.equal(isTerminal('completed'), true)
+    assert.equal(isTerminal('dropped'), true)
+  })
+})
+
 describe('addProject', () => {
-  it('inserts a project with active=true and null terminals', () => {
+  it('inserts a project at status=active with closed=null', () => {
     const { store, entity } = addProject(EMPTY_STORE, {
       id: 'X1',
       created: T0,
@@ -50,9 +58,8 @@ describe('addProject', () => {
     assert.equal(entity.type, 'project')
     assert.equal(entity.title, 'New')
     assert.equal(entity.note, 'hi')
-    assert.equal(entity.active, true)
-    assert.equal(entity.completed, null)
-    assert.equal(entity.dropped, null)
+    assert.equal(entity.status, 'active')
+    assert.equal(entity.closed, null)
     assert.equal(entity.created, T0)
     assert.equal(store.lists.length, 1)
   })
@@ -73,16 +80,15 @@ describe('addAction', () => {
       id: 'A1',
       created: T0,
       title: 'Do thing',
-      active: true,
-      list: 'P1',
+      status: 'active',
+      project: 'P1',
       due: '2026-05-01',
     })
     assert.equal(entity.type, 'action')
-    assert.equal(entity.list, 'P1')
-    assert.equal(entity.active, true)
+    assert.equal(entity.project, 'P1')
+    assert.equal(entity.status, 'active')
     assert.equal(entity.due, '2026-05-01')
-    assert.equal(entity.completed, null)
-    assert.equal(entity.dropped, null)
+    assert.equal(entity.closed, null)
   })
 
   it('creates a deferred standalone action', () => {
@@ -90,10 +96,10 @@ describe('addAction', () => {
       id: 'A1',
       created: T0,
       title: 'Someday',
-      active: false,
+      status: 'deferred',
     })
-    assert.equal(entity.list, null)
-    assert.equal(entity.active, false)
+    assert.equal(entity.project, null)
+    assert.equal(entity.status, 'deferred')
   })
 
   it('rejects unknown parent project', () => {
@@ -103,8 +109,8 @@ describe('addAction', () => {
           id: 'A1',
           created: T0,
           title: 'x',
-          active: true,
-          list: 'NOPE',
+          status: 'active',
+          project: 'NOPE',
         }),
       InvalidArgument,
     )
@@ -112,14 +118,15 @@ describe('addAction', () => {
 })
 
 describe('addWaiting', () => {
-  it('creates a waiting item without active flag', () => {
+  it('creates a waiting item at status=active', () => {
     const { entity } = addWaiting(EMPTY_STORE, {
       id: 'W1',
       created: T0,
       title: 'Waiting',
     })
     assert.equal(entity.type, 'waiting')
-    assert.equal((entity as Record<string, unknown>).active, undefined)
+    assert.equal(entity.status, 'active')
+    assert.equal(entity.closed, null)
   })
 })
 
@@ -169,13 +176,13 @@ describe('editItem', () => {
     const { store, entity } = editItem(s, 'A1', {
       title: 'A1 renamed',
       due: '2026-06-01',
-      list: null,
+      project: null,
     })
     s = store
     assert.equal(entity.type, 'action')
     assert.equal(entity.title, 'A1 renamed')
     assert.equal((entity as ActionItem).due, '2026-06-01')
-    assert.equal(entity.list, null)
+    assert.equal(entity.project, null)
   })
 
   it('rejects --due on waiting items', () => {
@@ -190,7 +197,7 @@ describe('editItem', () => {
   })
 
   it('rejects unknown new parent project', () => {
-    assert.throws(() => editItem(seed(), 'A1', { list: 'NOPE' }), InvalidArgument)
+    assert.throws(() => editItem(seed(), 'A1', { project: 'NOPE' }), InvalidArgument)
   })
 
   it('throws NothingToEdit when no fields', () => {
@@ -198,64 +205,72 @@ describe('editItem', () => {
   })
 })
 
-describe('setActive', () => {
-  it('activates a deferred action and clears terminal', () => {
+describe('setStatus', () => {
+  it('activates a completed action and clears closed', () => {
     let s = seed()
-    s = setCompleted(s, 'A2', T0).store
-    const { entity } = setActive(s, 'A2', true)
-    assert.equal((entity as ActionItem).active, true)
-    assert.equal((entity as ActionItem).completed, null)
-    assert.equal((entity as ActionItem).dropped, null)
+    s = setStatus(s, 'A2', 'completed', T0).store
+    const { entity } = setStatus(s, 'A2', 'active', null)
+    assert.equal((entity as ActionItem).status, 'active')
+    assert.equal((entity as ActionItem).closed, null)
   })
 
-  it('defers a project and clears terminal', () => {
+  it('defers a project that was dropped', () => {
     let s = seed()
-    s = setDropped(s, 'P1', T0).store
-    const { entity } = setActive(s, 'P1', false)
-    assert.equal((entity as ProjectList).active, false)
-    assert.equal((entity as ProjectList).dropped, null)
+    s = setStatus(s, 'P1', 'dropped', T0).store
+    const { entity } = setStatus(s, 'P1', 'deferred', null)
+    assert.equal((entity as ProjectList).status, 'deferred')
+    assert.equal((entity as ProjectList).closed, null)
   })
 
-  it('rejects on waiting items', () => {
-    assert.throws(() => setActive(seed(), 'W1', true), InvalidArgument)
-    assert.throws(() => setActive(seed(), 'W1', false), InvalidArgument)
+  it('rejects activate and defer on waiting items', () => {
+    assert.throws(() => setStatus(seed(), 'W1', 'active', null), InvalidArgument)
+    assert.throws(() => setStatus(seed(), 'W1', 'deferred', null), InvalidArgument)
   })
-})
 
-describe('setCompleted / setDropped', () => {
-  it('completed and dropped are mutually exclusive', () => {
+  it('completes a waiting item', () => {
+    const { entity } = setStatus(seed(), 'W1', 'completed', T0)
+    assert.equal((entity as WaitingItem).status, 'completed')
+    assert.equal((entity as WaitingItem).closed, T0)
+  })
+
+  it('drops a project', () => {
+    const { entity } = setStatus(seed(), 'P1', 'dropped', T0)
+    assert.equal((entity as ProjectList).status, 'dropped')
+    assert.equal((entity as ProjectList).closed, T0)
+  })
+
+  it('rejects active/deferred with a timestamp', () => {
+    assert.throws(() => setStatus(seed(), 'A1', 'active', T0), InvalidArgument)
+    assert.throws(() => setStatus(seed(), 'A1', 'deferred', T0), InvalidArgument)
+  })
+
+  it('rejects completed/dropped without a timestamp', () => {
+    assert.throws(() => setStatus(seed(), 'A1', 'completed', null), InvalidArgument)
+    assert.throws(() => setStatus(seed(), 'A1', 'dropped', null), InvalidArgument)
+  })
+
+  it('completed and dropped are mutually exclusive (closed reflects last write)', () => {
     let s = seed()
-    s = setCompleted(s, 'A1', T0).store
+    s = setStatus(s, 'A1', 'completed', T0).store
     let entity = findItem(s, 'A1') as ActionItem
-    assert.equal(entity.completed, T0)
-    assert.equal(entity.dropped, null)
+    assert.equal(entity.status, 'completed')
+    assert.equal(entity.closed, T0)
 
-    s = setDropped(s, 'A1', '2026-04-28T00:00:00Z').store
+    s = setStatus(s, 'A1', 'dropped', '2026-04-28T00:00:00Z').store
     entity = findItem(s, 'A1') as ActionItem
-    assert.equal(entity.dropped, '2026-04-28T00:00:00Z')
-    assert.equal(entity.completed, null)
-  })
-
-  it('works on waiting items', () => {
-    const s = seed()
-    const { entity } = setCompleted(s, 'W1', T0)
-    assert.equal((entity as WaitingItem).completed, T0)
-  })
-
-  it('works on projects', () => {
-    const { entity } = setDropped(seed(), 'P1', T0)
-    assert.equal((entity as ProjectList).dropped, T0)
+    assert.equal(entity.status, 'dropped')
+    assert.equal(entity.closed, '2026-04-28T00:00:00Z')
   })
 })
 
 describe('bucket helpers', () => {
-  it('liveActions filters by active=true, !terminal, parent active', () => {
+  it('liveActions filters by status=active and parent active', () => {
     const s = seed()
     const ids = liveActions(s).map((a) => a.id).sort()
     assert.deepEqual(ids, ['A1', 'A3'])
   })
 
-  it('deferredActions filters by active=false, !terminal, parent active', () => {
+  it('deferredActions filters by status=deferred and parent active', () => {
     const s = seed()
     const ids = deferredActions(s).map((a) => a.id)
     assert.deepEqual(ids, ['A2'])
@@ -268,35 +283,35 @@ describe('bucket helpers', () => {
 
   it('hides children of a deferred parent project from liveActions', () => {
     let s = seed()
-    s = setActive(s, 'P1', false).store
+    s = setStatus(s, 'P1', 'deferred', null).store
     const ids = liveActions(s).map((a) => a.id)
     assert.deepEqual(ids, ['A3'])
   })
 
   it('hides children of a deferred parent project from liveWaiting', () => {
     let s = seed()
-    s = setActive(s, 'P1', false).store
+    s = setStatus(s, 'P1', 'deferred', null).store
     assert.deepEqual(liveWaiting(s), [])
   })
 
   it('hides children of a completed parent project too', () => {
     let s = seed()
-    s = setCompleted(s, 'P1', T0).store
+    s = setStatus(s, 'P1', 'completed', T0).store
     const ids = liveActions(s).map((a) => a.id)
     assert.deepEqual(ids, ['A3'])
   })
 
   it('excludes terminal items from active buckets', () => {
     let s = seed()
-    s = setCompleted(s, 'A1', T0).store
+    s = setStatus(s, 'A1', 'completed', T0).store
     const ids = liveActions(s).map((a) => a.id)
     assert.deepEqual(ids, ['A3'])
   })
 
   it('activeProjects/deferredProjects exclude terminal projects', () => {
     let s = seed()
-    s = setActive(s, 'P2', false).store
-    s = setCompleted(s, 'P1', T0).store
+    s = setStatus(s, 'P2', 'deferred', null).store
+    s = setStatus(s, 'P1', 'completed', T0).store
     const active = activeProjects(s).map((p) => p.id)
     const def = deferredProjects(s).map((p) => p.id)
     assert.deepEqual(active, [])
@@ -315,10 +330,10 @@ describe('immutability', () => {
     assert.equal(s.items, beforeItems)
   })
 
-  it('replaceItem returns a new array', () => {
+  it('setStatus returns a new items array', () => {
     let s = seed()
     const beforeItems = s.items
-    s = setCompleted(s, 'A1', T0).store
+    s = setStatus(s, 'A1', 'completed', T0).store
     assert.notEqual(s.items, beforeItems)
   })
 })

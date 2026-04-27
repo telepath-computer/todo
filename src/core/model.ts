@@ -2,6 +2,9 @@ import { InvalidArgument, NotFound, NothingToEdit } from './errors.js'
 
 // Schema ---------------------------------------------------------------
 
+export type Status = 'active' | 'deferred' | 'completed' | 'dropped'
+export type WaitingStatus = Exclude<Status, 'deferred'>
+
 export type BaseList = {
   id: string
   title: string
@@ -11,16 +14,15 @@ export type BaseList = {
 
 export type ProjectList = BaseList & {
   type: 'project'
-  active: boolean
-  completed: string | null
-  dropped: string | null
+  status: Status
+  closed: string | null     // ISO ts; non-null iff status is completed/dropped
 }
 
 export type List = ProjectList
 
 export type BaseItem = {
   id: string
-  list: string | null
+  project: string | null
   title: string
   note: string | null
   created: string
@@ -28,16 +30,15 @@ export type BaseItem = {
 
 export type ActionItem = BaseItem & {
   type: 'action'
-  active: boolean
+  status: Status
   due: string | null
-  completed: string | null
-  dropped: string | null
+  closed: string | null
 }
 
 export type WaitingItem = BaseItem & {
   type: 'waiting'
-  completed: string | null
-  dropped: string | null
+  status: WaitingStatus
+  closed: string | null
 }
 
 export type Item = ActionItem | WaitingItem
@@ -48,6 +49,12 @@ export type Store = {
 }
 
 export const EMPTY_STORE: Store = { lists: [], items: [] }
+
+const TERMINAL_STATUSES: ReadonlySet<Status> = new Set(['completed', 'dropped'])
+
+export function isTerminal(s: Status): s is 'completed' | 'dropped' {
+  return TERMINAL_STATUSES.has(s)
+}
 
 // Lookup ---------------------------------------------------------------
 
@@ -115,9 +122,8 @@ export function addProject(s: Store, input: AddProjectInput): { store: Store; en
     title: requireValidTitle(input.title),
     note: input.note ?? null,
     created: input.created,
-    active: true,
-    completed: null,
-    dropped: null,
+    status: 'active',
+    closed: null,
   }
   return { store: { ...s, lists: [...s.lists, entity] }, entity }
 }
@@ -126,26 +132,25 @@ export type AddActionInput = {
   id: string
   created: string
   title: string
-  active: boolean
-  list?: string | null
+  status: 'active' | 'deferred'
+  project?: string | null
   due?: string | null
   note?: string | null
 }
 
 export function addAction(s: Store, input: AddActionInput): { store: Store; entity: ActionItem } {
   requireValidTitle(input.title)
-  requireListExists(s, input.list)
+  requireListExists(s, input.project)
   const entity: ActionItem = {
     id: input.id,
     type: 'action',
-    list: input.list ?? null,
+    project: input.project ?? null,
     title: input.title,
     note: input.note ?? null,
     created: input.created,
-    active: input.active,
+    status: input.status,
     due: input.due ?? null,
-    completed: null,
-    dropped: null,
+    closed: null,
   }
   return { store: { ...s, items: [...s.items, entity] }, entity }
 }
@@ -154,22 +159,22 @@ export type AddWaitingInput = {
   id: string
   created: string
   title: string
-  list?: string | null
+  project?: string | null
   note?: string | null
 }
 
 export function addWaiting(s: Store, input: AddWaitingInput): { store: Store; entity: WaitingItem } {
   requireValidTitle(input.title)
-  requireListExists(s, input.list)
+  requireListExists(s, input.project)
   const entity: WaitingItem = {
     id: input.id,
     type: 'waiting',
-    list: input.list ?? null,
+    project: input.project ?? null,
     title: input.title,
     note: input.note ?? null,
     created: input.created,
-    completed: null,
-    dropped: null,
+    status: 'active',
+    closed: null,
   }
   return { store: { ...s, items: [...s.items, entity] }, entity }
 }
@@ -197,7 +202,7 @@ export type EditItemPatch = {
   title?: string
   note?: string | null
   due?: string | null
-  list?: string | null
+  project?: string | null
 }
 
 export function editItem(s: Store, id: string, patch: EditItemPatch): { store: Store; entity: Item } {
@@ -207,121 +212,98 @@ export function editItem(s: Store, id: string, patch: EditItemPatch): { store: S
     patch.title === undefined &&
     patch.note === undefined &&
     patch.due === undefined &&
-    patch.list === undefined
+    patch.project === undefined
   ) {
     throw new NothingToEdit('nothing to edit')
   }
   if (patch.due !== undefined && item.type === 'waiting') {
     throw new InvalidArgument('--due is not allowed on waiting items')
   }
-  if (patch.list !== undefined) requireListExists(s, patch.list)
+  if (patch.project !== undefined) requireListExists(s, patch.project)
 
   if (item.type === 'action') {
     const next: ActionItem = { ...item }
     if (patch.title !== undefined) next.title = requireValidTitle(patch.title)
     if (patch.note !== undefined) next.note = patch.note
     if (patch.due !== undefined) next.due = patch.due
-    if (patch.list !== undefined) next.list = patch.list
+    if (patch.project !== undefined) next.project = patch.project
     return { store: replaceItem(s, next), entity: next }
   }
   const next: WaitingItem = { ...item }
   if (patch.title !== undefined) next.title = requireValidTitle(patch.title)
   if (patch.note !== undefined) next.note = patch.note
-  if (patch.list !== undefined) next.list = patch.list
+  if (patch.project !== undefined) next.project = patch.project
   return { store: replaceItem(s, next), entity: next }
 }
 
 // Lifecycle ------------------------------------------------------------
 
-export function setActive(
+export function setStatus(
   s: Store,
   id: string,
-  active: boolean,
-): { store: Store; entity: ProjectList | ActionItem } {
+  status: Status,
+  ts: string | null,
+): { store: Store; entity: List | Item } {
+  // Argument shape invariants — same for every entity type.
+  if (isTerminal(status) && ts === null) {
+    throw new InvalidArgument(`status "${status}" requires a timestamp`)
+  }
+  if (!isTerminal(status) && ts !== null) {
+    throw new InvalidArgument(`status "${status}" must not have a timestamp`)
+  }
+
   const e = requireEntity(s, id)
+  const closed = isTerminal(status) ? ts : null
+
   if (e.type === 'waiting') {
-    throw new InvalidArgument(
-      `cannot ${active ? 'activate' : 'defer'} waiting item ${id} (no active flag)`,
-    )
-  }
-  if (e.type === 'project') {
-    const next: ProjectList = { ...e, active, completed: null, dropped: null }
-    return { store: replaceList(s, next), entity: next }
-  }
-  const next: ActionItem = { ...e, active, completed: null, dropped: null }
-  return { store: replaceItem(s, next), entity: next }
-}
-
-export function setCompleted(s: Store, id: string, ts: string): { store: Store; entity: List | Item } {
-  const e = requireEntity(s, id)
-  if (e.type === 'project') {
-    const next: ProjectList = { ...e, completed: ts, dropped: null }
-    return { store: replaceList(s, next), entity: next }
-  }
-  if (e.type === 'action') {
-    const next: ActionItem = { ...e, completed: ts, dropped: null }
+    if (!isTerminal(status)) {
+      throw new InvalidArgument(
+        `cannot ${status === 'deferred' ? 'defer' : 'activate'} waiting item ${id} ` +
+          `(waiting items only transition to completed/dropped)`,
+      )
+    }
+    const next: WaitingItem = { ...e, status, closed }
     return { store: replaceItem(s, next), entity: next }
   }
-  const next: WaitingItem = { ...e, completed: ts, dropped: null }
-  return { store: replaceItem(s, next), entity: next }
-}
-
-export function setDropped(s: Store, id: string, ts: string): { store: Store; entity: List | Item } {
-  const e = requireEntity(s, id)
   if (e.type === 'project') {
-    const next: ProjectList = { ...e, dropped: ts, completed: null }
+    const next: ProjectList = { ...e, status, closed }
     return { store: replaceList(s, next), entity: next }
   }
-  if (e.type === 'action') {
-    const next: ActionItem = { ...e, dropped: ts, completed: null }
-    return { store: replaceItem(s, next), entity: next }
-  }
-  const next: WaitingItem = { ...e, dropped: ts, completed: null }
+  const next: ActionItem = { ...e, status, closed }
   return { store: replaceItem(s, next), entity: next }
 }
 
 // Bucket helpers -------------------------------------------------------
 
-function isItemTerminal(i: Item): boolean {
-  return i.completed !== null || i.dropped !== null
-}
-
-function isListTerminal(l: List): boolean {
-  return l.completed !== null || l.dropped !== null
-}
-
-function parentActive(s: Store, listId: string | null): boolean {
-  if (listId === null) return true
-  const parent = findList(s, listId)
+function parentActive(s: Store, projectId: string | null): boolean {
+  if (projectId === null) return true
+  const parent = findList(s, projectId)
   if (!parent) return true
-  return parent.active && !isListTerminal(parent)
+  return parent.status === 'active'
 }
 
 export function liveActions(s: Store): ActionItem[] {
   return s.items.filter(
-    (i): i is ActionItem =>
-      i.type === 'action' && i.active && !isItemTerminal(i) && parentActive(s, i.list),
+    (i): i is ActionItem => i.type === 'action' && i.status === 'active' && parentActive(s, i.project),
   )
 }
 
 export function deferredActions(s: Store): ActionItem[] {
   return s.items.filter(
-    (i): i is ActionItem =>
-      i.type === 'action' && !i.active && !isItemTerminal(i) && parentActive(s, i.list),
+    (i): i is ActionItem => i.type === 'action' && i.status === 'deferred' && parentActive(s, i.project),
   )
 }
 
 export function liveWaiting(s: Store): WaitingItem[] {
   return s.items.filter(
-    (i): i is WaitingItem =>
-      i.type === 'waiting' && !isItemTerminal(i) && parentActive(s, i.list),
+    (i): i is WaitingItem => i.type === 'waiting' && i.status === 'active' && parentActive(s, i.project),
   )
 }
 
 export function activeProjects(s: Store): ProjectList[] {
-  return s.lists.filter((l) => l.type === 'project' && l.active && !isListTerminal(l))
+  return s.lists.filter((l) => l.type === 'project' && l.status === 'active')
 }
 
 export function deferredProjects(s: Store): ProjectList[] {
-  return s.lists.filter((l) => l.type === 'project' && !l.active && !isListTerminal(l))
+  return s.lists.filter((l) => l.type === 'project' && l.status === 'deferred')
 }

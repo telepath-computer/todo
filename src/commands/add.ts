@@ -33,14 +33,14 @@ export function addCmd(opts: AddCmdOpts): string {
   const store = readStore(dataDir)
   const id = newId()
   const created = nowIso()
-  const list = opts.project ?? null
+  const project = opts.project ?? null
 
   if (opts.waiting) {
     const { store: next, entity } = addWaiting(store, {
       id,
       created,
       title: opts.title,
-      list,
+      project,
       note: opts.note ?? null,
     })
     writeStore(dataDir, next)
@@ -52,8 +52,8 @@ export function addCmd(opts: AddCmdOpts): string {
     id,
     created,
     title: opts.title,
-    active: !!opts.active,
-    list,
+    status: opts.active ? 'active' : 'deferred',
+    project,
     due,
     note: opts.note ?? null,
   })

@@ -18,7 +18,7 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
   if (opts.title !== undefined) patch.title = opts.title
   if (opts.note !== undefined) patch.note = opts.note === '' ? null : opts.note
   if (opts.due !== undefined) patch.due = opts.due === '' ? null : resolveDueInput(opts.due)
-  if (opts.project !== undefined) patch.list = opts.project === '' ? null : opts.project
+  if (opts.project !== undefined) patch.project = opts.project === '' ? null : opts.project
   const { store: next, entity } = editItem(store, id, patch)
   writeStore(dataDir, next)
   return json(entity)

@@ -4,14 +4,15 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { cleanup, makeTempDataDir, makeTempDir, parseJson, readJson, runCli } from './helpers.js'
 
+type Status = 'active' | 'deferred' | 'completed' | 'dropped'
+
 type Project = {
   id: string
   type: 'project'
   title: string
   note: string | null
-  active: boolean
-  completed: string | null
-  dropped: string | null
+  status: Status
+  closed: string | null
   created: string
 }
 
@@ -19,24 +20,23 @@ type Action = {
   id: string
   type: 'action'
   title: string
-  list: string | null
+  project: string | null
   note: string | null
   created: string
-  active: boolean
+  status: Status
   due: string | null
-  completed: string | null
-  dropped: string | null
+  closed: string | null
 }
 
 type Waiting = {
   id: string
   type: 'waiting'
   title: string
-  list: string | null
+  project: string | null
   note: string | null
   created: string
-  completed: string | null
-  dropped: string | null
+  status: 'active' | 'completed' | 'dropped'
+  closed: string | null
 }
 
 type Item = Action | Waiting
@@ -69,7 +69,7 @@ function cli(...args: string[]) {
 }
 
 function addProject(title: string, opts: { note?: string } = {}): Project {
-  const args = ['projects', 'add', '--title', title]
+  const args = ['projects', 'add', title]
   if (opts.note !== undefined) args.push('--note', opts.note)
   const r = cli(...args)
   assert.equal(r.code, 0, r.stderr)
@@ -211,25 +211,25 @@ describe('todo add', () => {
       due: '2026-05-03',
     })
     assert.equal(a.type, 'action')
-    assert.equal(a.active, true)
-    assert.equal(a.list, proj.id)
+    assert.equal(a.status, 'active')
+    assert.equal(a.project, proj.id)
     assert.equal(a.due, '2026-05-03')
-    assert.equal(a.completed, null)
-    assert.equal(a.dropped, null)
+    assert.equal(a.closed, null)
     assert.match(a.id, /^[0-9a-zA-Z]{8}$/)
   })
 
   it('creates a deferred standalone action', () => {
     const a = addAction('Someday', { deferred: true })
-    assert.equal(a.active, false)
-    assert.equal(a.list, null)
+    assert.equal(a.status, 'deferred')
+    assert.equal(a.project, null)
   })
 
   it('creates a waiting item without --due support', () => {
     const w = addWaitingItem('Tax docs', { note: 'sent 2026-04-15' })
     assert.equal(w.type, 'waiting')
+    assert.equal(w.status, 'active')
     assert.equal(w.note, 'sent 2026-04-15')
-    assert.equal(w.list, null)
+    assert.equal(w.project, null)
   })
 
   it('errors when no mode flag is given', () => {
@@ -292,7 +292,7 @@ describe('todo edit <id>', () => {
     const proj = addProject('P')
     const a = addAction('x', { active: true, project: proj.id })
     const out = parseJson<Action>(cli('edit', a.id, '--project', '').stdout)
-    assert.equal(out.list, null)
+    assert.equal(out.project, null)
   })
 
   it('errors on --due against waiting', () => {
@@ -323,7 +323,8 @@ describe('todo projects add/edit', () => {
     const p = addProject('Telepath', { note: 'big idea' })
     assert.equal(p.type, 'project')
     assert.equal(p.note, 'big idea')
-    assert.equal(p.active, true)
+    assert.equal(p.status, 'active')
+    assert.equal(p.closed, null)
   })
 
   it('edits a project, clearing note with ""', () => {
@@ -334,8 +335,8 @@ describe('todo projects add/edit', () => {
     assert.equal(out.note, null)
   })
 
-  it('rejects empty title on add (commander requires the value, but empty must error)', () => {
-    const r = cli('projects', 'add', '--title', '   ')
+  it('rejects empty title on add', () => {
+    const r = cli('projects', 'add', '   ')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /title is required/i)
   })
@@ -344,24 +345,23 @@ describe('todo projects add/edit', () => {
 // ---- Lifecycle -------------------------------------------------------
 
 describe('lifecycle (activate/defer/complete/drop)', () => {
-  it('activate sets active=true and clears terminal', () => {
+  it('activate sets status=active and clears closed', () => {
     const p = addProject('P')
     cli('complete', p.id)
     const out = parseJson<Project>(cli('activate', p.id).stdout)
-    assert.equal(out.active, true)
-    assert.equal(out.completed, null)
-    assert.equal(out.dropped, null)
+    assert.equal(out.status, 'active')
+    assert.equal(out.closed, null)
   })
 
-  it('defer sets active=false and clears terminal', () => {
+  it('defer sets status=deferred and clears closed', () => {
     const a = addAction('x', { active: true })
     cli('drop', a.id)
     const out = parseJson<Action>(cli('defer', a.id).stdout)
-    assert.equal(out.active, false)
-    assert.equal(out.dropped, null)
+    assert.equal(out.status, 'deferred')
+    assert.equal(out.closed, null)
   })
 
-  it('activate/defer reject waiting items', () => {
+  it('activate/defer both reject waiting items', () => {
     const w = addWaitingItem('w')
     let r = cli('activate', w.id)
     assert.equal(r.code, 1)
@@ -371,20 +371,21 @@ describe('lifecycle (activate/defer/complete/drop)', () => {
     assert.match(r.stderr, /waiting/i)
   })
 
-  it('complete and drop are mutually exclusive (last write wins, other clears)', () => {
+  it('complete and drop are mutually exclusive (last write wins on closed timestamp)', () => {
     const a = addAction('x', { active: true })
     let out: Item = parseJson<Action>(cli('complete', a.id).stdout)
-    assert.notEqual(out.completed, null)
-    assert.equal(out.dropped, null)
+    assert.equal(out.status, 'completed')
+    assert.notEqual(out.closed, null)
     out = parseJson<Action>(cli('drop', a.id).stdout)
-    assert.equal(out.completed, null)
-    assert.notEqual(out.dropped, null)
+    assert.equal(out.status, 'dropped')
+    assert.notEqual(out.closed, null)
   })
 
   it('complete/drop accept waiting items', () => {
     const w = addWaitingItem('w')
     const out = parseJson<Waiting>(cli('complete', w.id).stdout)
-    assert.notEqual(out.completed, null)
+    assert.equal(out.status, 'completed')
+    assert.notEqual(out.closed, null)
   })
 })
 
