@@ -46,43 +46,37 @@ Not added to `WaitingItem` or `ProjectList` (out of scope; see below).
 
 ## CLI surface
 
-### `todo add action`
+The schema says "schedule = deferred + start_at". The CLI follows: `--start`
+is an optional modifier on `--deferred` / `defer`, not a separate mode or verb.
 
-Three mutually-exclusive mode flags (today's two + one new):
+### `todo add action`
 
 ```
 todo add action --title "..." --active       [...]
-todo add action --title "..." --deferred     [...]
-todo add action --title "..." --start <date> [...]
+todo add action --title "..." --deferred [--start <date>] [...]
 ```
 
-- `--active` — `status=active`, `start_at=null`.
-- `--deferred` — `status=deferred`, `start_at=null`.
-- `--start <date>` — `status=deferred`, `start_at=<date>`. (No separate `--scheduled` flag — `--start` IS the schedule mode.)
-
-Validation:
-- Exactly one of the three is required.
-- `--start` requires a date that parses (YYYY-MM-DD or natural language via chrono).
+- `--active` and `--deferred` are mutually exclusive; exactly one required.
+- `--start <date>` valid only with `--deferred`. Combined with `--active` → reject.
+- `--start` parses YYYY-MM-DD or natural language via chrono.
 - `--start <past-date>` rejected with `start date must be in the future`.
 
-### Lifecycle (new verb)
+### Lifecycle (no new verbs; existing `defer` accepts `--start`)
 
 ```
-todo schedule <id> --start <date>
+todo activate <id>                   # status=active,   start_at=null, closed_at=null
+todo defer <id> [--start <date>]     # status=deferred, start_at=<date or null>, closed_at=null
+todo complete <id>                   # status=completed, closed_at=now,  start_at=null
+todo drop <id>                       # status=dropped,   closed_at=now,  start_at=null
 ```
 
-- Only valid on actions. (Rejects projects and waiting.)
-- Sets `status='deferred'`, `start_at=<date>`, clears `closed_at`.
-- `--start` required. Same date-parse + future-only rule as `add`.
-
-Existing verbs gain `start_at` clearing as a side effect:
-
-```
-todo activate <id>     # ... + start_at=null
-todo defer <id>        # ... + start_at=null     ← clears any prior schedule
-todo complete <id>     # ... + start_at=null
-todo drop <id>         # ... + start_at=null
-```
+- `defer` always sets `status='deferred'`. `--start` controls `start_at`:
+  present = scheduled-deferred, absent = open-ended deferred.
+- `defer` without `--start` clears any prior `start_at` (going from "until Sept 1"
+  to "open-ended someday").
+- `defer --start` only valid on actions. Projects/waiting still reject `defer`
+  with `--start` (same as today's `defer` rejection on waiting; projects accept
+  `defer` but not `--start`).
 
 ### `todo edit <id>`
 
@@ -150,7 +144,9 @@ todo list --all       # also { scheduled_actions, deferred_actions, deferred_pro
 - If `start`: parse via `requireFutureDate`, call `addAction` with `status='deferred'`, `start_at=<resolved>`.
 
 ### `src/commands/lifecycle.ts`
-- New `scheduleCmd(id, start)`.
+- `deferCmd` accepts optional `start?: string`. Parse via `requireFutureDate`,
+  pass through to `setStatus` (or a new `setDeferred(s, id, start_at)`
+  shorthand on the model).
 
 ### `src/commands/edit.ts`
 - Accept `--start`. On action: parse via `requireFutureDate` (or `null` if `""`), set `start_at` and (if non-null) flip `status='deferred'`.
@@ -160,9 +156,10 @@ todo list --all       # also { scheduled_actions, deferred_actions, deferred_pro
 - `listCmd` `--all` adds `scheduled_actions` to the output.
 
 ### `src/cli.ts`
-- New subcommand `add action --start <date>` (already covered if `--start` flag exists).
-- New verb `todo schedule <id> --start <date>`.
-- New flag `todo edit <id> --start <date>`.
+- `add action` gains optional `--start <date>` (only valid with `--deferred`).
+- `defer <id>` gains optional `--start <date>`.
+- `edit <id>` gains optional `--start <date>` (action-only; implicit transition
+  to `status='deferred'`).
 
 ## Tests
 
