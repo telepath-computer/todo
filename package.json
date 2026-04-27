@@ -9,7 +9,7 @@
   "files": [
     "dist",
     "docs/spec.md",
-    "docs/cli.md",
+    "docs/architecture.md",
     "README.md"
   ],
   "keywords": [

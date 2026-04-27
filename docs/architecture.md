@@ -1,4 +1,4 @@
-# CLI implementation
+# Architecture
 
 Implementation notes for the `todo` CLI. The user-facing surface is in
 [spec.md](./spec.md); this file records architecture and conventions.
