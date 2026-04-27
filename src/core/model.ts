@@ -413,3 +413,45 @@ export function activeDeadlines(s: Store, today: string): DeadlineItem[] {
       parentActive(s, i.project),
   )
 }
+
+// Project-scoped buckets for `todo show <project-id>`. These mirror the
+// dashboard buckets but skip the parent-cascade filter — when drilling into
+// a specific project, the user wants its contents regardless of the
+// project's own status.
+
+export function projectActiveActions(s: Store, today: string, projectId: string): ActionItem[] {
+  return s.items.filter((i): i is ActionItem => {
+    if (!isAction(i)) return false
+    if (i.project !== projectId) return false
+    if (i.status === 'active') return true
+    if (i.status === 'deferred' && i.start_at !== null && i.start_at <= today) return true
+    return false
+  })
+}
+
+export function projectDeferredActions(s: Store, today: string, projectId: string): ActionItem[] {
+  return s.items.filter(
+    (i): i is ActionItem =>
+      isAction(i) &&
+      i.project === projectId &&
+      i.status === 'deferred' &&
+      (i.start_at === null || i.start_at > today),
+  )
+}
+
+export function projectWaiting(s: Store, projectId: string): WaitingItem[] {
+  return s.items.filter(
+    (i): i is WaitingItem =>
+      i.type === 'waiting' && i.project === projectId && i.status === 'active',
+  )
+}
+
+export function projectDeadlines(s: Store, today: string, projectId: string): DeadlineItem[] {
+  return s.items.filter(
+    (i): i is DeadlineItem =>
+      i.type === 'deadline' &&
+      i.project === projectId &&
+      i.status === 'active' &&
+      i.date >= today,
+  )
+}

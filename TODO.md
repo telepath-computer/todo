@@ -4,6 +4,17 @@ Backlog for `todo`. Rough buckets; within each, earlier items land first.
 
 ## P1 — quality of life
 
+- **Narrative + Advice default for reads.** Flip `todo list` and `todo show`
+  to a markdown-style default — `# Active actions (3)` headings, one item per
+  line with `(id)` leading, plus a final `## Advice` section that surfaces
+  silent-failure cases (lapsed deadlines, stalled active projects, scheduled
+  actions about to revive, stale waiting). Keep mutation responses (add /
+  edit / lifecycle) as canonical entity JSON. Add `--json` to reads for the
+  raw structured shape. This is an interface for an agent — the dashboard
+  should *coach* it about what's hidden, not just enumerate what's visible.
+  Each Advice note grounded in a specific data condition; ends with concrete
+  next commands; absent when nothing's notable. Hand-authored, not
+  auto-generated.
 - **Sort / group output.** `todo list` returns insertion order. Add ordering to
   `active_actions` (overdue first, then due-today, then soonest, then undated;
   break ties by `created` asc) and groupings (e.g. by parent project).

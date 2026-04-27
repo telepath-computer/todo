@@ -229,6 +229,45 @@ describe('todo show <id>', () => {
     assert.equal(parseJson<Waiting>(cli('show', w.id).stdout).id, w.id)
   })
 
+  it('embeds project contents (active/deferred actions, waiting, deadlines)', () => {
+    const p = addProject('P')
+    const otherProj = addProject('Other')
+    const act = addAction('a', { active: true, project: p.id })
+    const def = addAction('d', { deferred: true, project: p.id })
+    const w = addWaitingItem('w', { project: p.id })
+    const d = addDeadlineItem('dl', { date: FUTURE, project: p.id })
+    addAction('elsewhere', { active: true, project: otherProj.id })
+
+    type ProjectShow = Project & {
+      active_actions: Action[]
+      deferred_actions: Action[]
+      waiting: Waiting[]
+      deadlines: Deadline[]
+    }
+    const out = parseJson<ProjectShow>(cli('show', p.id).stdout)
+    assert.deepEqual(out.active_actions.map((x) => x.id), [act.id])
+    assert.deepEqual(out.deferred_actions.map((x) => x.id), [def.id])
+    assert.deepEqual(out.waiting.map((x) => x.id), [w.id])
+    assert.deepEqual(out.deadlines.map((x) => x.id), [d.id])
+  })
+
+  it('shows project contents even when the project itself is deferred', () => {
+    const p = addProject('P')
+    const a = addAction('a', { active: true, project: p.id })
+    cli('defer', p.id)
+
+    type ProjectShow = Project & { active_actions: Action[] }
+    const out = parseJson<ProjectShow>(cli('show', p.id).stdout)
+    assert.equal(out.status, 'deferred')
+    assert.deepEqual(out.active_actions.map((x) => x.id), [a.id])
+  })
+
+  it('does not embed contents on non-project entities', () => {
+    const a = addAction('a', { active: true })
+    const out = parseJson<Action & { active_actions?: unknown }>(cli('show', a.id).stdout)
+    assert.equal(out.active_actions, undefined)
+  })
+
   it('errors on unknown id with non-zero exit', () => {
     const r = cli('show', 'nopeNope')
     assert.equal(r.code, 1)

@@ -149,7 +149,7 @@ up across both `lists` and `items`.
 |---|---|
 | `todo list` | `{ active_actions, active_projects, deadlines, waiting }` |
 | `todo list --all` | also `{ deferred_actions, deferred_projects }` |
-| `todo show <id>` | the canonical entity |
+| `todo show <id>` | the canonical entity (for projects, also embeds `active_actions`, `deferred_actions`, `waiting`, `deadlines` scoped to the project — regardless of the project's own status) |
 
 **Bucket filters** (compared against host-local `YYYY-MM-DD`):
 
