@@ -5,12 +5,7 @@ import { InvalidArgument } from './errors.js'
 import { stableStringify } from './store.js'
 
 export type Config = {
-  dataDir: string | null
-}
-
-export type ResolvedConfig = {
-  dataDir: string
-  source: 'env' | 'config' | 'default'
+  data_dir: string | null
 }
 
 export const ENV_VAR = 'TODO_DATA_DIR'
@@ -25,10 +20,10 @@ export function defaultDataDir(): string {
 
 export function readConfig(): Config {
   const path = configPath()
-  if (!existsSync(path)) return { dataDir: null }
+  if (!existsSync(path)) return { data_dir: null }
   const raw = readFileSync(path, 'utf8')
   const parsed = JSON.parse(raw) as Partial<Config>
-  return { dataDir: typeof parsed.dataDir === 'string' ? parsed.dataDir : null }
+  return { data_dir: typeof parsed.data_dir === 'string' ? parsed.data_dir : null }
 }
 
 function requireAbsolute(path: string, source: string): void {
@@ -40,22 +35,22 @@ function requireAbsolute(path: string, source: string): void {
 }
 
 export function writeConfig(c: Config): void {
-  if (c.dataDir !== null) requireAbsolute(c.dataDir, 'config')
+  if (c.data_dir !== null) requireAbsolute(c.data_dir, 'config')
   const path = configPath()
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, stableStringify(c) + '\n')
 }
 
-export function resolveDataDir(): ResolvedConfig {
+export function resolveDataDir(): { dataDir: string } {
   const fromEnv = process.env[ENV_VAR]
   if (fromEnv && fromEnv.length > 0) {
     requireAbsolute(fromEnv, 'env TODO_DATA_DIR')
-    return { dataDir: fromEnv, source: 'env' }
+    return { dataDir: fromEnv }
   }
   const cfg = readConfig()
-  if (cfg.dataDir) {
-    requireAbsolute(cfg.dataDir, 'config')
-    return { dataDir: cfg.dataDir, source: 'config' }
+  if (cfg.data_dir) {
+    requireAbsolute(cfg.data_dir, 'config')
+    return { dataDir: cfg.data_dir }
   }
-  return { dataDir: defaultDataDir(), source: 'default' }
+  return { dataDir: defaultDataDir() }
 }

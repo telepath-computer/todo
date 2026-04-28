@@ -1,8 +1,8 @@
 # Hints
 
-`todo` (the dashboard) ends with a `# Hints` section when one of these
-conditions fires. Hints are the place where the GTD-filtering blind spots
-get surfaced — facts the dashboard would otherwise hide.
+`todo` (the dashboard) ends with a `HINTS:` section when one of these
+conditions fires. Hints are the place where the GTD-filtering blind
+spots get surfaced — facts the dashboard would otherwise hide.
 
 Each hint is grounded in a specific data condition. When nothing fires the
 section is omitted entirely (no filler).
@@ -21,7 +21,7 @@ agent confirms the user grokked it, then drops it.
 
 **Format.**
 ```
-- (id) <title> deadline passed N days ago. Confirm with the user it's grokked, then `todo drop <id>`.
+- "<title>" [<id>] deadline passed N days ago. Confirm with the user it's grokked, then `todo drop <id>`.
 ```
 
 Older lapsed-but-still-active deadlines (>7 days) are not surfaced. They
@@ -40,7 +40,7 @@ quietly stalled. The agent doesn't know to enforce that without being told.
 
 **Format.**
 ```
-- (id) <Title>: no active actions, <N> waiting, <M> deadlines. Either blocked on a waiting item, needs a next action defined, or consider `todo defer <id>`.
+- "<title>" [<id>]: no active actions, <N> waiting, <M> deadlines. Either blocked on a waiting item, needs a next action defined, or consider `todo defer <id>`.
 ```
 
 ### 3. Stale waiting
@@ -54,7 +54,7 @@ dragging. After a week it's worth a poke.
 
 **Format (one bullet per stale item).**
 ```
-- (id) <title> waiting N days. Worth a follow-up?
+- "<title>" [<id>] waiting N days. Worth a follow-up?
 ```
 
 ### 4. Long-tail deferred count
@@ -72,7 +72,7 @@ doesn't know how big the someday/maybe queue is. One line, informational.
 
 ## Ordering
 
-Bullets within `# Hints` appear in this fixed order:
+Bullets within `HINTS:` appear in this fixed order:
 
 1. Recent lapsed deadlines (most likely to need a response).
 2. Stalled active projects.
@@ -83,8 +83,10 @@ Bullets within `# Hints` appear in this fixed order:
 
 - `src/core/hints.ts` — one function per trigger plus a `renderHints`
   composer. Pure functions; no I/O.
-- `src/core/render.ts` — the `renderDashboard` and `renderShow` (project
-  case) call into `renderHints` and append the section if non-empty.
+- `src/core/render.ts` — `renderDashboard` calls `renderHints` and
+  appends the section if non-empty. `renderShow` does **not** call into
+  hints; the triggers are dashboard-scoped (global to the store) and
+  surfacing them on a single-project view would conflate scopes.
 
 ## Why not more triggers?
 

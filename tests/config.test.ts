@@ -38,27 +38,27 @@ function withoutEnvDataDir<T>(fn: () => T): T {
 }
 
 describe('readConfig / writeConfig', () => {
-  it('returns { dataDir: null } when config file is missing', () => {
+  it('returns { data_dir: null } when config file is missing', () => {
     withSandboxedHome(() => {
-      assert.deepEqual(readConfig(), { dataDir: null })
+      assert.deepEqual(readConfig(), { data_dir: null })
     })
   })
 
-  it('round-trips dataDir', () => {
+  it('round-trips data_dir', () => {
     withSandboxedHome(() => {
-      writeConfig({ dataDir: '/tmp/some/where' })
-      assert.deepEqual(readConfig(), { dataDir: '/tmp/some/where' })
+      writeConfig({ data_dir: '/tmp/some/where' })
+      assert.deepEqual(readConfig(), { data_dir: '/tmp/some/where' })
     })
   })
 
   it('writes JSON with sorted keys + trailing newline', () => {
     withSandboxedHome((home) => {
-      writeConfig({ dataDir: '/x' })
+      writeConfig({ data_dir: '/x' })
       const path = join(home, '.todo', 'config.json')
       assert.ok(existsSync(path))
       const raw = readFileSync(path, 'utf8')
       assert.ok(raw.endsWith('\n'))
-      assert.equal(raw.trim(), '{\n  "dataDir": "/x"\n}')
+      assert.equal(raw.trim(), '{\n  "data_dir": "/x"\n}')
     })
   })
 })
@@ -68,7 +68,6 @@ describe('resolveDataDir', () => {
     withSandboxedHome(() => {
       withoutEnvDataDir(() => {
         const r = resolveDataDir()
-        assert.equal(r.source, 'default')
         assert.equal(r.dataDir, defaultDataDir())
       })
     })
@@ -77,9 +76,8 @@ describe('resolveDataDir', () => {
   it('reads from config when present', () => {
     withSandboxedHome(() => {
       withoutEnvDataDir(() => {
-        writeConfig({ dataDir: '/tmp/from-config' })
+        writeConfig({ data_dir: '/tmp/from-config' })
         const r = resolveDataDir()
-        assert.equal(r.source, 'config')
         assert.equal(r.dataDir, '/tmp/from-config')
       })
     })
@@ -87,12 +85,11 @@ describe('resolveDataDir', () => {
 
   it('env var beats config', () => {
     withSandboxedHome(() => {
-      writeConfig({ dataDir: '/tmp/from-config' })
+      writeConfig({ data_dir: '/tmp/from-config' })
       const prev = process.env[ENV_VAR]
       process.env[ENV_VAR] = '/tmp/from-env'
       try {
         const r = resolveDataDir()
-        assert.equal(r.source, 'env')
         assert.equal(r.dataDir, '/tmp/from-env')
       } finally {
         if (prev === undefined) delete process.env[ENV_VAR]
@@ -110,7 +107,7 @@ describe('resolveDataDir', () => {
   it('rejects relative paths in writeConfig', () => {
     withSandboxedHome(() => {
       assert.throws(
-        () => writeConfig({ dataDir: 'rel/path' }),
+        () => writeConfig({ data_dir: 'rel/path' }),
         InvalidArgument,
       )
     })

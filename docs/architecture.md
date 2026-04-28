@@ -23,7 +23,7 @@ src/
 ├── cli.ts                 commander wiring
 ├── commands/              thin glue: parse args → call core → render → write/print
 │   ├── add.ts             addProjectCmd / addActionCmd / addWaitingCmd / addDeadlineCmd
-│   ├── config.ts          set-data-dir / config
+│   ├── config.ts          config (read/list/write keys; data_dir)
 │   ├── dashboard.ts       bare `todo` — calls renderDashboard + renderHints
 │   ├── edit.ts            polymorphic on entity (project / action / waiting / deadline)
 │   ├── lifecycle.ts       activate / defer / complete / drop
@@ -31,7 +31,7 @@ src/
 │   ├── shared.ts          json() helper
 │   └── show.ts            single-entity narrative (projects embed children + Hints)
 └── core/
-    ├── config.ts          ~/.todo/config.json + dataDir resolution (env > config > default)
+    ├── config.ts          ~/.todo/config.json + data_dir resolution (env > config > default)
     ├── dates.ts           --due / --date parser (chrono-node), todayLocal, requireFutureDate
     ├── errors.ts          DoError, NotFound, NothingToEdit, InvalidArgument, InvalidDate
     ├── hints.ts           Hint trigger functions (lapsed deadlines, stalled projects, stale waiting, deferred count) + renderHints composer

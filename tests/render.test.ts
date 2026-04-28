@@ -12,14 +12,10 @@ import {
 import {
   dayDelta,
   daysSince,
-  deadlineModifier,
-  dueModifier,
+  quote,
   renderDashboard,
-  renderItemLine,
   renderList,
-  renderProjectLine,
   renderShow,
-  startModifier,
   totalDeferredItems,
   truncateNote,
 } from '../src/core/render.js'
@@ -39,44 +35,16 @@ describe('dayDelta', () => {
     assert.equal(dayDelta('2025-04-27', '2026-04-27'), -365)
   })
 
-  it('handles month boundaries', () => {
+  it('handles month boundaries and DST shifts (no fractional days)', () => {
     assert.equal(dayDelta('2026-05-01', '2026-04-30'), 1)
+    assert.equal(dayDelta('2026-11-12', '2026-04-27'), 199)
   })
 })
 
 describe('daysSince', () => {
-  it('returns days between an ISO timestamp and today', () => {
+  it('returns whole days between an ISO timestamp and today', () => {
     assert.equal(daysSince('2026-04-27T10:00:00Z', '2026-04-27'), 0)
     assert.equal(daysSince('2026-04-20T10:00:00Z', '2026-04-27'), 7)
-  })
-})
-
-describe('dueModifier', () => {
-  it('renders future / today / tomorrow / overdue', () => {
-    assert.equal(dueModifier('2026-04-27', '2026-04-27'), 'due 2026-04-27 (today)')
-    assert.equal(dueModifier('2026-04-28', '2026-04-27'), 'due 2026-04-28 (tomorrow)')
-    assert.equal(dueModifier('2026-05-04', '2026-04-27'), 'due 2026-05-04 (in 7 days)')
-    assert.equal(dueModifier('2026-04-26', '2026-04-27'), 'due 2026-04-26 (overdue 1 day)')
-    assert.equal(dueModifier('2026-04-20', '2026-04-27'), 'due 2026-04-20 (overdue 7 days)')
-  })
-})
-
-describe('deadlineModifier', () => {
-  it('renders future / today / tomorrow / passed', () => {
-    assert.equal(deadlineModifier('2026-04-27', '2026-04-27'), 'date 2026-04-27 (today)')
-    assert.equal(deadlineModifier('2026-04-28', '2026-04-27'), 'date 2026-04-28 (tomorrow)')
-    assert.equal(deadlineModifier('2026-11-12', '2026-04-27'), 'date 2026-11-12 (in 199 days)')
-    assert.equal(deadlineModifier('2026-04-26', '2026-04-27'), 'date 2026-04-26 (passed 1 day ago)')
-    assert.equal(deadlineModifier('2026-04-20', '2026-04-27'), 'date 2026-04-20 (passed 7 days ago)')
-  })
-})
-
-describe('startModifier', () => {
-  it('renders revives / revived', () => {
-    assert.equal(startModifier('2026-04-27', '2026-04-27'), 'start 2026-04-27 (revives today)')
-    assert.equal(startModifier('2026-04-28', '2026-04-27'), 'start 2026-04-28 (revives tomorrow)')
-    assert.equal(startModifier('2026-05-04', '2026-04-27'), 'start 2026-05-04 (revives in 7 days)')
-    assert.equal(startModifier('2026-04-26', '2026-04-27'), 'start 2026-04-26 (revived 1 day ago)')
   })
 })
 
@@ -86,7 +54,7 @@ describe('truncateNote', () => {
   })
 
   it('truncates at soft word boundary with ellipsis', () => {
-    const note = 'a '.repeat(100) // 200 chars; many spaces
+    const note = 'a '.repeat(100)
     const out = truncateNote(note, 50)
     assert.ok(out.length <= 51)
     assert.ok(out.endsWith('…'))
@@ -100,7 +68,18 @@ describe('truncateNote', () => {
   })
 })
 
-// ---- Item / project lines -------------------------------------------
+describe('quote', () => {
+  it('wraps a string in double quotes', () => {
+    assert.equal(quote('hello'), '"hello"')
+  })
+
+  it('escapes embedded backslashes and quotes', () => {
+    assert.equal(quote('say "hi"'), '"say \\"hi\\""')
+    assert.equal(quote('a\\b'), '"a\\\\b"')
+  })
+})
+
+// ---- Seed helper ----------------------------------------------------
 
 function seed(): Store {
   let s: Store = EMPTY_STORE
@@ -149,111 +128,50 @@ function seed(): Store {
   return s
 }
 
-describe('renderItemLine', () => {
-  it('renders an active action with due + project + no note', () => {
-    const s = seed()
-    const a = s.items.find((i) => i.id === 'A1')!
-    assert.equal(
-      renderItemLine(a, s, TODAY),
-      '- (A1) Find guests — due 2026-04-28 (tomorrow), project Telepath (P1)',
-    )
-  })
-
-  it('renders an action with note only', () => {
-    const s = seed()
-    const a = s.items.find((i) => i.id === 'A2')!
-    assert.equal(
-      renderItemLine(a, s, TODAY),
-      '- (A2) Email Steve — note: "follow up on contract"',
-    )
-  })
-
-  it('renders a waiting item with project and waiting age', () => {
-    const s = seed()
-    const w = s.items.find((i) => i.id === 'W1')!
-    assert.equal(
-      renderItemLine(w, s, TODAY),
-      '- (W1) Cover art from designer — project Telepath (P1), waiting 12 days',
-    )
-  })
-
-  it('renders a deadline with date relative + project', () => {
-    const s = seed()
-    const d = s.items.find((i) => i.id === 'D1')!
-    assert.equal(
-      renderItemLine(d, s, TODAY),
-      '- (D1) Q3 launch — date 2026-11-12 (in 199 days), project Telepath (P1)',
-    )
-  })
-
-  it('list-mode appends status (and closed when terminal)', () => {
-    let s = seed()
-    s = setStatus(s, 'A1', { status: 'completed', closed_at: '2026-04-26T10:00:00Z' }).store
-    const a = s.items.find((i) => i.id === 'A1')!
-    assert.equal(
-      renderItemLine(a, s, TODAY, { listMode: true }),
-      '- (A1) Find guests — due 2026-04-28 (tomorrow), project Telepath (P1), status completed, closed 2026-04-26T10:00:00Z',
-    )
-  })
-
-  it('renders a deferred action with start_at', () => {
-    const s = seed()
-    const a = s.items.find((i) => i.id === 'A4')!
-    assert.equal(
-      renderItemLine(a, s, TODAY),
-      '- (A4) Renew domain — start 2026-05-04 (revives in 7 days)',
-    )
-  })
-})
-
-describe('renderProjectLine', () => {
-  it('renders a project with counts', () => {
-    const s = seed()
-    const p = s.lists[0]
-    assert.equal(
-      renderProjectLine(p, s),
-      '- (P1) Telepath — 1 action, 1 waiting, 1 deadline, note: "Indie thinking tool"',
-    )
-  })
-
-  it('renders a project with no children with no counts modifier', () => {
-    const s = addProject(EMPTY_STORE, { id: 'P9', created_at: T0, title: 'Empty' }).store
-    assert.equal(renderProjectLine(s.lists[0], s), '- (P9) Empty')
-  })
-
-  it('list-mode appends status', () => {
-    const s = seed()
-    const p = s.lists[0]
-    assert.equal(
-      renderProjectLine(p, s, { listMode: true }),
-      '- (P1) Telepath — 1 action, 1 waiting, 1 deadline, status active, note: "Indie thinking tool"',
-    )
-  })
-})
-
-// ---- Dashboard, list, show ------------------------------------------
+// ---- Dashboard ------------------------------------------------------
 
 describe('renderDashboard', () => {
   it('renders empty store as empty string', () => {
     assert.equal(renderDashboard(EMPTY_STORE, TODAY), '')
   })
 
-  it('renders all four buckets in canonical order, no Hints when not provided', () => {
+  it('renders all four buckets in canonical order without status (status implicit)', () => {
     const s = seed()
     const out = renderDashboard(s, TODAY)
     const expected = [
-      '# Active actions (2)',
-      '- (A1) Find guests — due 2026-04-28 (tomorrow), project Telepath (P1)',
-      '- (A2) Email Steve — note: "follow up on contract"',
+      'ACTIVE ACTIONS [2]:',
       '',
-      '# Waiting (1)',
-      '- (W1) Cover art from designer — project Telepath (P1), waiting 12 days',
+      '- id: A1',
+      '  title: "Find guests"',
+      '  due: 2026-04-28 (tomorrow)',
+      '  project: Telepath [P1]',
       '',
-      '# Deadlines (1)',
-      '- (D1) Q3 launch — date 2026-11-12 (in 199 days), project Telepath (P1)',
+      '- id: A2',
+      '  title: "Email Steve"',
+      '  note: "follow up on contract"',
       '',
-      '# Active projects (1)',
-      '- (P1) Telepath — 1 action, 1 waiting, 1 deadline, note: "Indie thinking tool"',
+      'WAITING [1]:',
+      '',
+      '- id: W1',
+      '  title: "Cover art from designer"',
+      '  project: Telepath [P1]',
+      '  age: 12 days',
+      '',
+      'DEADLINES [1]:',
+      '',
+      '- id: D1',
+      '  title: "Q3 launch"',
+      '  date: 2026-11-12 (in 199 days)',
+      '  project: Telepath [P1]',
+      '',
+      'ACTIVE PROJECTS [1]:',
+      '',
+      '- id: P1',
+      '  title: "Telepath"',
+      '  actions: 1',
+      '  waiting: 1',
+      '  deadlines: 1',
+      '  note: "Indie thinking tool"',
     ].join('\n')
     assert.equal(out, expected)
   })
@@ -262,47 +180,67 @@ describe('renderDashboard', () => {
     let s: Store = EMPTY_STORE
     s = addAction(s, { id: 'A1', created_at: T0, title: 'Just an action', status: 'active' }).store
     const out = renderDashboard(s, TODAY)
-    assert.ok(out.includes('# Active actions'))
-    assert.ok(!out.includes('# Waiting'))
-    assert.ok(!out.includes('# Deadlines'))
-    assert.ok(!out.includes('# Active projects'))
+    assert.ok(out.includes('ACTIVE ACTIONS'))
+    assert.ok(!out.includes('WAITING'))
+    assert.ok(!out.includes('DEADLINES'))
+    assert.ok(!out.includes('ACTIVE PROJECTS'))
   })
 
-  it('appends Hints when provided', () => {
+  it('appends Hints section when provided', () => {
     const s = seed()
     const out = renderDashboard(s, TODAY, '- a hint\n- another hint\n')
-    assert.ok(out.endsWith('# Hints\n- a hint\n- another hint\n'))
+    assert.ok(out.endsWith('HINTS:\n\n- a hint\n- another hint'))
   })
 
   it('does not append Hints heading when hints string is empty', () => {
     const s = seed()
     const out = renderDashboard(s, TODAY, '')
-    assert.ok(!out.includes('# Hints'))
+    assert.ok(!out.includes('HINTS:'))
+  })
+
+  it('past-due-scheduled action shows up under ACTIVE ACTIONS with start field', () => {
+    let s: Store = EMPTY_STORE
+    s = addAction(s, {
+      id: 'X1',
+      created_at: T0,
+      title: 'Bridged',
+      status: 'deferred',
+      start_at: '2026-04-25',
+    }).store
+    const out = renderDashboard(s, TODAY)
+    assert.ok(out.includes('ACTIVE ACTIONS [1]:'))
+    assert.ok(out.includes('- id: X1'))
+    assert.ok(out.includes('start: 2026-04-25 (revived 2 days ago)'))
+    // status omitted in dashboard context
+    assert.ok(!out.includes('status:'))
   })
 })
 
+// ---- List -----------------------------------------------------------
+
 describe('renderList', () => {
-  it('renders all actions regardless of status, with status modifier', () => {
+  it('renders all actions regardless of status, with status field', () => {
     let s = seed()
     s = setStatus(s, 'A2', { status: 'completed', closed_at: '2026-04-26T10:00:00Z' }).store
     const out = renderList(s, TODAY, 'actions')
-    assert.ok(out.startsWith('# Actions (4)'))
-    assert.ok(out.includes('- (A1) Find guests'))
-    assert.ok(out.includes('status active'))
-    assert.ok(out.includes('- (A2) Email Steve'))
-    assert.ok(out.includes('status completed'))
-    assert.ok(out.includes('closed 2026-04-26T10:00:00Z'))
-    assert.ok(out.includes('- (A3) Read DDIA'))
-    assert.ok(out.includes('status deferred'))
-    assert.ok(out.includes('- (A4) Renew domain'))
+    assert.ok(out.startsWith('ACTIONS [4]:'))
+    assert.ok(out.includes('- id: A1'))
+    assert.ok(out.includes('  status: active'))
+    assert.ok(out.includes('- id: A2'))
+    assert.ok(out.includes('  status: completed'))
+    assert.ok(out.includes('  closed: 2026-04-26T10:00:00Z'))
+    assert.ok(out.includes('- id: A3'))
+    assert.ok(out.includes('  status: deferred'))
+    assert.ok(out.includes('- id: A4'))
   })
 
   it('renders all projects regardless of status', () => {
     let s = seed()
     s = setStatus(s, 'P1', { status: 'dropped', closed_at: '2026-04-26T10:00:00Z' }).store
     const out = renderList(s, TODAY, 'projects')
-    assert.ok(out.startsWith('# Projects (1)'))
-    assert.ok(out.includes('status dropped'))
+    assert.ok(out.startsWith('PROJECTS [1]:'))
+    assert.ok(out.includes('  status: dropped'))
+    assert.ok(out.includes('  closed: 2026-04-26T10:00:00Z'))
   })
 
   it('renders deadlines even when past-date or dropped', () => {
@@ -311,16 +249,18 @@ describe('renderList', () => {
     s = addDeadline(s, { id: 'D2', created_at: T0, title: 'future', date: '2026-09-01' }).store
     s = setStatus(s, 'D2', { status: 'dropped', closed_at: T0 }).store
     const out = renderList(s, TODAY, 'deadlines')
-    assert.ok(out.startsWith('# Deadlines (2)'))
-    assert.ok(out.includes('- (D1) past'))
-    assert.ok(out.includes('- (D2) future'))
-    assert.ok(out.includes('status dropped'))
+    assert.ok(out.startsWith('DEADLINES [2]:'))
+    assert.ok(out.includes('- id: D1'))
+    assert.ok(out.includes('- id: D2'))
+    assert.ok(out.includes('  status: dropped'))
   })
 
-  it('renders empty types as just the heading', () => {
-    assert.equal(renderList(EMPTY_STORE, TODAY, 'actions'), '# Actions (0)')
+  it('renders empty types as just the count-zero heading', () => {
+    assert.equal(renderList(EMPTY_STORE, TODAY, 'actions'), 'ACTIONS [0]:')
   })
 })
+
+// ---- Show non-project ----------------------------------------------
 
 describe('renderShow non-projects', () => {
   it('renders an action with all fields populated', () => {
@@ -337,17 +277,18 @@ describe('renderShow non-projects', () => {
     })
     s = result.store
     const expected = [
-      '# Action — Find guests (A1)',
-      '- Status: active',
-      '- Due: 2026-04-28 (tomorrow)',
-      '- Project: Tel (P1)',
-      '- Created: 2026-04-27T10:00:00Z',
-      '- Note: check Discord',
+      'ACTION: "Find guests" [A1]',
+      '',
+      'status: active',
+      'due: 2026-04-28 (tomorrow)',
+      'project: Tel [P1]',
+      'note: "check Discord"',
+      'created: 2026-04-27T10:00:00Z',
     ].join('\n')
     assert.equal(renderShow(s, TODAY, result.entity), expected)
   })
 
-  it('renders a waiting item including waiting-days', () => {
+  it('renders a waiting item including age', () => {
     const s = addWaiting(EMPTY_STORE, {
       id: 'W1',
       created_at: '2026-04-15T10:00:00Z',
@@ -355,12 +296,11 @@ describe('renderShow non-projects', () => {
     }).store
     const w = s.items[0]
     const expected = [
-      '# Waiting — Cover art (W1)',
-      '- Status: active',
-      '- Waiting: 12 days',
-      '- Project: (none)',
-      '- Created: 2026-04-15T10:00:00Z',
-      '- Note: (none)',
+      'WAITING: "Cover art" [W1]',
+      '',
+      'status: active',
+      'age: 12 days',
+      'created: 2026-04-15T10:00:00Z',
     ].join('\n')
     assert.equal(renderShow(s, TODAY, w), expected)
   })
@@ -374,29 +314,50 @@ describe('renderShow non-projects', () => {
     }).store
     const d = s.items[0]
     const expected = [
-      '# Deadline — Q3 launch (D1)',
-      '- Status: active',
-      '- Date: 2026-11-12 (in 199 days)',
-      '- Project: (none)',
-      '- Created: 2026-04-27T10:00:00Z',
-      '- Note: (none)',
+      'DEADLINE: "Q3 launch" [D1]',
+      '',
+      'status: active',
+      'date: 2026-11-12 (in 199 days)',
+      'created: 2026-04-27T10:00:00Z',
     ].join('\n')
     assert.equal(renderShow(s, TODAY, d), expected)
   })
+
+  it('omits the project field when project is null', () => {
+    const s = addAction(EMPTY_STORE, {
+      id: 'A1',
+      created_at: T0,
+      title: 'Standalone',
+      status: 'active',
+    }).store
+    const a = s.items[0]
+    const out = renderShow(s, TODAY, a)
+    assert.ok(!out.includes('project:'))
+  })
 })
 
+// ---- Show project ---------------------------------------------------
+
 describe('renderShow project', () => {
-  it('renders project header with embedded buckets', () => {
+  it('renders project header + flush-left body + sub-buckets without project ref on children', () => {
     const s = seed()
     const p = s.lists[0]
     const out = renderShow(s, TODAY, p)
-    assert.ok(out.startsWith('# Project — Telepath (P1)'))
-    assert.ok(out.includes('## Active actions (1)'))
-    assert.ok(out.includes('- (A1) Find guests'))
-    assert.ok(out.includes('## Waiting (1)'))
-    assert.ok(out.includes('- (W1) Cover art from designer'))
-    assert.ok(out.includes('## Deadlines (1)'))
-    assert.ok(out.includes('- (D1) Q3 launch'))
+    assert.ok(out.startsWith('PROJECT: "Telepath" [P1]'))
+    assert.ok(out.includes('\nstatus: active\n'))
+    assert.ok(out.includes('\nnote: "Indie thinking tool"'))
+    // No counts in the body — sub-buckets enumerate children themselves.
+    assert.ok(!/^actions: \d/m.test(out))
+    assert.ok(!/^waiting: \d/m.test(out))
+    assert.ok(!/^deadlines: \d/m.test(out))
+    assert.ok(out.includes('ACTIVE ACTIONS [1]:'))
+    assert.ok(out.includes('- id: A1'))
+    assert.ok(out.includes('WAITING [1]:'))
+    assert.ok(out.includes('- id: W1'))
+    assert.ok(out.includes('DEADLINES [1]:'))
+    assert.ok(out.includes('- id: D1'))
+    // Children inside a project show should not duplicate the project ref.
+    assert.ok(!out.includes('  project: Telepath [P1]'))
   })
 
   it('shows project contents even when project is deferred', () => {
@@ -404,26 +365,28 @@ describe('renderShow project', () => {
     s = setStatus(s, 'P1', { status: 'deferred', start_at: null }).store
     const p = s.lists[0]
     const out = renderShow(s, TODAY, p)
-    assert.ok(out.includes('Status: deferred'))
-    assert.ok(out.includes('## Active actions (1)'))
+    assert.ok(out.includes('\nstatus: deferred\n'))
+    assert.ok(out.includes('ACTIVE ACTIONS [1]:'))
   })
 
   it('omits empty sub-buckets', () => {
     const s = addProject(EMPTY_STORE, { id: 'P1', created_at: T0, title: 'Empty' }).store
     const p = s.lists[0]
     const out = renderShow(s, TODAY, p)
-    assert.ok(out.includes('# Project — Empty (P1)'))
-    assert.ok(!out.includes('## Active actions'))
-    assert.ok(!out.includes('## Waiting'))
+    assert.ok(out.startsWith('PROJECT: "Empty" [P1]'))
+    assert.ok(!out.includes('ACTIVE ACTIONS'))
+    assert.ok(!out.includes('WAITING'))
   })
 
-  it('embeds Hints when provided', () => {
+  it('does not render a HINTS section', () => {
     const s = seed()
     const p = s.lists[0]
-    const out = renderShow(s, TODAY, p, '- some hint\n')
-    assert.ok(out.includes('## Hints\n- some hint\n'))
+    const out = renderShow(s, TODAY, p)
+    assert.ok(!out.includes('HINTS:'))
   })
 })
+
+// ---- Deferred totals ------------------------------------------------
 
 describe('totalDeferredItems', () => {
   it('counts deferred actions and projects together', () => {

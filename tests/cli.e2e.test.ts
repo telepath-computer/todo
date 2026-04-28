@@ -167,7 +167,7 @@ describe('todo (bare dashboard)', () => {
     assert.equal(r.stdout, '')
   })
 
-  it('includes active actions, waiting, deadlines, active projects in markdown', () => {
+  it('includes active actions, waiting, deadlines, active projects as YAML-like blocks', () => {
     const proj = addProject('Telepath')
     const act = addAction('Find guests', { active: true, project: proj.id })
     addAction('Read DDIA', { deferred: true })
@@ -175,14 +175,18 @@ describe('todo (bare dashboard)', () => {
 
     const r = cli()
     assert.equal(r.code, 0, r.stderr)
-    assert.match(r.stdout, /^# Active actions \(1\)$/m)
-    assert.ok(r.stdout.includes(`- (${act.id}) Find guests`))
-    assert.match(r.stdout, /^# Waiting \(1\)$/m)
-    assert.ok(r.stdout.includes('Cover art'))
-    assert.match(r.stdout, /^# Active projects \(1\)$/m)
-    assert.ok(r.stdout.includes(`- (${proj.id}) Telepath`))
+    assert.match(r.stdout, /^ACTIVE ACTIONS \[1\]:$/m)
+    assert.ok(r.stdout.includes(`- id: ${act.id}`))
+    assert.ok(r.stdout.includes('  title: "Find guests"'))
+    assert.match(r.stdout, /^WAITING \[1\]:$/m)
+    assert.ok(r.stdout.includes('  title: "Cover art"'))
+    assert.match(r.stdout, /^ACTIVE PROJECTS \[1\]:$/m)
+    assert.ok(r.stdout.includes(`- id: ${proj.id}`))
+    assert.ok(r.stdout.includes('  title: "Telepath"'))
     // Deferred bucket isn't surfaced on the dashboard.
-    assert.doesNotMatch(r.stdout, /^# Deferred/m)
+    assert.doesNotMatch(r.stdout, /^DEFERRED/m)
+    // Status hidden in dashboard buckets.
+    assert.doesNotMatch(r.stdout, /^\s*status:/m)
   })
 
   it('hides actions whose parent project is deferred', () => {
@@ -190,36 +194,36 @@ describe('todo (bare dashboard)', () => {
     const child = addAction('child', { active: true, project: proj.id })
     cli('defer', proj.id)
     const r = cli()
-    assert.ok(!r.stdout.includes(`(${child.id})`))
+    assert.ok(!r.stdout.includes(`id: ${child.id}`))
   })
 
   it('excludes terminal items', () => {
     const a = addAction('done', { active: true })
     cli('complete', a.id)
     const r = cli()
-    assert.doesNotMatch(r.stdout, /# Active actions/)
+    assert.doesNotMatch(r.stdout, /ACTIVE ACTIONS/)
   })
 })
 
 describe('todo list <type>', () => {
-  it('lists all actions regardless of status with status modifier', () => {
+  it('lists all actions regardless of status with status field', () => {
     const a1 = addAction('a1', { active: true })
     const a2 = addAction('a2', { deferred: true })
     const r = cli('list', 'actions')
     assert.equal(r.code, 0, r.stderr)
-    assert.match(r.stdout, /^# Actions \(2\)$/m)
-    assert.ok(r.stdout.includes(`- (${a1.id}) a1`))
-    assert.ok(r.stdout.includes('status active'))
-    assert.ok(r.stdout.includes(`- (${a2.id}) a2`))
-    assert.ok(r.stdout.includes('status deferred'))
+    assert.match(r.stdout, /^ACTIONS \[2\]:$/m)
+    assert.ok(r.stdout.includes(`- id: ${a1.id}`))
+    assert.ok(r.stdout.includes('  status: active'))
+    assert.ok(r.stdout.includes(`- id: ${a2.id}`))
+    assert.ok(r.stdout.includes('  status: deferred'))
   })
 
   it('lists all projects regardless of status', () => {
     const p = addProject('P')
     cli('drop', p.id)
     const r = cli('list', 'projects')
-    assert.match(r.stdout, /^# Projects \(1\)$/m)
-    assert.ok(r.stdout.includes('status dropped'))
+    assert.match(r.stdout, /^PROJECTS \[1\]:$/m)
+    assert.ok(r.stdout.includes('  status: dropped'))
   })
 
   it('lists deadlines and waiting items', () => {
@@ -227,11 +231,11 @@ describe('todo list <type>', () => {
     const d = addDeadlineItem('Q3', { date: FUTURE, project: proj.id })
     const w = addWaitingItem('Cover', { project: proj.id })
     const rd = cli('list', 'deadlines')
-    assert.match(rd.stdout, /^# Deadlines \(1\)$/m)
-    assert.ok(rd.stdout.includes(`(${d.id})`))
+    assert.match(rd.stdout, /^DEADLINES \[1\]:$/m)
+    assert.ok(rd.stdout.includes(`id: ${d.id}`))
     const rw = cli('list', 'waiting')
-    assert.match(rw.stdout, /^# Waiting \(1\)$/m)
-    assert.ok(rw.stdout.includes(`(${w.id})`))
+    assert.match(rw.stdout, /^WAITING \[1\]:$/m)
+    assert.ok(rw.stdout.includes(`id: ${w.id}`))
   })
 
   it('rejects unknown type', () => {
@@ -243,33 +247,43 @@ describe('todo list <type>', () => {
   it('returns just the heading when nothing matches', () => {
     const r = cli('list', 'actions')
     assert.equal(r.code, 0)
-    assert.equal(r.stdout.trim(), '# Actions (0)')
+    assert.equal(r.stdout.trim(), 'ACTIONS [0]:')
   })
 })
 
 describe('todo show <id>', () => {
-  it('renders projects with a header and key fields', () => {
+  it('renders projects with a header and flush-left key fields', () => {
     const p = addProject('P', { note: 'hi' })
     const r = cli('show', p.id)
     assert.equal(r.code, 0)
-    assert.match(r.stdout, new RegExp(`^# Project — P \\(${p.id}\\)$`, 'm'))
-    assert.ok(r.stdout.includes('- Status: active'))
-    assert.ok(r.stdout.includes('- Note: hi'))
+    assert.match(r.stdout, new RegExp(`^PROJECT: "P" \\[${p.id}\\]$`, 'm'))
+    assert.match(r.stdout, /^status: active$/m)
+    assert.match(r.stdout, /^note: "hi"$/m)
+    // Body is flush-left, not indented.
+    assert.doesNotMatch(r.stdout, /^  status:/m)
+  })
+
+  it('does not show a HINTS section on a project view', () => {
+    const p = addProject('P')
+    addAction('someday', { deferred: true })
+    const r = cli('show', p.id)
+    assert.equal(r.code, 0)
+    assert.ok(!r.stdout.includes('HINTS:'))
   })
 
   it('renders an action with header and key fields', () => {
     const a = addAction('A', { active: true })
     const r = cli('show', a.id)
     assert.equal(r.code, 0)
-    assert.match(r.stdout, new RegExp(`^# Action — A \\(${a.id}\\)$`, 'm'))
-    assert.ok(r.stdout.includes('- Status: active'))
+    assert.match(r.stdout, new RegExp(`^ACTION: "A" \\[${a.id}\\]$`, 'm'))
+    assert.match(r.stdout, /^status: active$/m)
   })
 
-  it('renders a waiting item with waiting-days', () => {
+  it('renders a waiting item with age', () => {
     const w = addWaitingItem('W')
     const r = cli('show', w.id)
-    assert.match(r.stdout, new RegExp(`^# Waiting — W \\(${w.id}\\)$`, 'm'))
-    assert.match(r.stdout, /- Waiting: \d+ days/)
+    assert.match(r.stdout, new RegExp(`^WAITING: "W" \\[${w.id}\\]$`, 'm'))
+    assert.match(r.stdout, /^age: \d+ days?$/m)
   })
 
   it('embeds project sub-buckets (active/deferred actions, waiting, deadlines)', () => {
@@ -283,14 +297,14 @@ describe('todo show <id>', () => {
 
     const r = cli('show', p.id)
     assert.equal(r.code, 0)
-    assert.match(r.stdout, /^## Active actions \(1\)$/m)
-    assert.ok(r.stdout.includes(`(${act.id})`))
-    assert.match(r.stdout, /^## Deferred actions \(1\)$/m)
-    assert.ok(r.stdout.includes(`(${def.id})`))
-    assert.match(r.stdout, /^## Waiting \(1\)$/m)
-    assert.ok(r.stdout.includes(`(${w.id})`))
-    assert.match(r.stdout, /^## Deadlines \(1\)$/m)
-    assert.ok(r.stdout.includes(`(${d.id})`))
+    assert.match(r.stdout, /^ACTIVE ACTIONS \[1\]:$/m)
+    assert.ok(r.stdout.includes(`id: ${act.id}`))
+    assert.match(r.stdout, /^DEFERRED ACTIONS \[1\]:$/m)
+    assert.ok(r.stdout.includes(`id: ${def.id}`))
+    assert.match(r.stdout, /^WAITING \[1\]:$/m)
+    assert.ok(r.stdout.includes(`id: ${w.id}`))
+    assert.match(r.stdout, /^DEADLINES \[1\]:$/m)
+    assert.ok(r.stdout.includes(`id: ${d.id}`))
     // The "elsewhere" action is in the other project; not shown.
     assert.ok(!r.stdout.includes('elsewhere'))
   })
@@ -300,15 +314,17 @@ describe('todo show <id>', () => {
     const a = addAction('a', { active: true, project: p.id })
     cli('defer', p.id)
     const r = cli('show', p.id)
-    assert.ok(r.stdout.includes('- Status: deferred'))
-    assert.match(r.stdout, /^## Active actions \(1\)$/m)
-    assert.ok(r.stdout.includes(`(${a.id})`))
+    assert.match(r.stdout, /^status: deferred$/m)
+    assert.match(r.stdout, /^ACTIVE ACTIONS \[1\]:$/m)
+    assert.ok(r.stdout.includes(`id: ${a.id}`))
   })
 
   it('does not embed sub-buckets on non-project entities', () => {
     const a = addAction('a', { active: true })
     const r = cli('show', a.id)
-    assert.doesNotMatch(r.stdout, /^## /m)
+    assert.doesNotMatch(r.stdout, /^ACTIVE ACTIONS/m)
+    assert.doesNotMatch(r.stdout, /^WAITING \[/m)
+    assert.doesNotMatch(r.stdout, /^DEADLINES/m)
   })
 
   it('errors on unknown id with non-zero exit', () => {
@@ -513,54 +529,65 @@ describe('lifecycle (activate/defer/complete/drop)', () => {
 
 // ---- Config ----------------------------------------------------------
 
-describe('config / set-data-dir', () => {
-  it('config reports default source when nothing set', () => {
+describe('todo config', () => {
+  it('bare config prints data_dir resolved to default when nothing set', () => {
     const home = makeTempDir('todo-home-')
     try {
       const r = runCli(['config'], { home, env: { TODO_DATA_DIR: undefined } })
-      assert.equal(r.code, 0)
-      const out = parseJson<{ source: string; dataDir: string }>(r.stdout)
-      assert.equal(out.source, 'default')
+      assert.equal(r.code, 0, r.stderr)
+      assert.match(r.stdout, /^data_dir: .+\.todo\/data$/m)
     } finally {
       cleanup(home)
     }
   })
 
-  it('config reports env source when TODO_DATA_DIR is set', () => {
+  it('bare config reflects TODO_DATA_DIR when set', () => {
     const r = cli('config')
-    const out = parseJson<{ source: string; dataDir: string }>(r.stdout)
-    assert.equal(out.source, 'env')
-    assert.equal(out.dataDir, dataDir)
+    assert.equal(r.code, 0)
+    assert.equal(r.stdout.trim(), `data_dir: ${dataDir}`)
   })
 
-  it('set-data-dir writes config and returns config-source', () => {
+  it('config data_dir reads the resolved data_dir', () => {
+    const r = cli('config', 'data_dir')
+    assert.equal(r.code, 0)
+    assert.equal(r.stdout.trim(), `data_dir: ${dataDir}`)
+  })
+
+  it('config data_dir <abs-path> writes config and returns JSON', () => {
     const home = makeTempDir('todo-home-')
     const target = makeTempDataDir()
     try {
-      const r = runCli(['set-data-dir', target], { home, env: { TODO_DATA_DIR: undefined } })
-      assert.equal(r.code, 0)
-      const out = parseJson<{ source: string; dataDir: string }>(r.stdout)
-      assert.equal(out.source, 'config')
-      assert.equal(out.dataDir, target)
-      // Re-run config from the same sandbox HOME (without env)
-      const r2 = runCli(['config'], { home, env: { TODO_DATA_DIR: undefined } })
-      const out2 = parseJson<{ source: string }>(r2.stdout)
-      assert.equal(out2.source, 'config')
+      const r = runCli(['config', 'data_dir', target], { home, env: { TODO_DATA_DIR: undefined } })
+      assert.equal(r.code, 0, r.stderr)
+      const out = parseJson<{ data_dir: string }>(r.stdout)
+      assert.equal(out.data_dir, target)
+      // Re-run read in same sandbox; should reflect the persisted config.
+      const r2 = runCli(['config', 'data_dir'], { home, env: { TODO_DATA_DIR: undefined } })
+      assert.equal(r2.stdout.trim(), `data_dir: ${target}`)
     } finally {
       cleanup(home)
       cleanup(target)
     }
   })
 
-  it('rejects relative paths in set-data-dir', () => {
+  it('rejects relative paths in config data_dir <path>', () => {
     const home = makeTempDir('todo-home-')
     try {
-      const r = runCli(['set-data-dir', 'relative/path'], { home, env: { TODO_DATA_DIR: undefined } })
+      const r = runCli(['config', 'data_dir', 'relative/path'], {
+        home,
+        env: { TODO_DATA_DIR: undefined },
+      })
       assert.equal(r.code, 1)
       assert.match(r.stderr, /absolute path/i)
     } finally {
       cleanup(home)
     }
+  })
+
+  it('rejects unknown config keys', () => {
+    const r = cli('config', 'nonsense')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /unknown config key/i)
   })
 
   it('rejects relative TODO_DATA_DIR with a clean error', () => {
@@ -825,9 +852,9 @@ describe('start dates', () => {
     it('scheduled actions appear in `list actions` with status deferred', () => {
       const a = addAction('Read DDIA', { deferred: true, start: futureDate(30) })
       const r = cli('list', 'actions')
-      assert.ok(r.stdout.includes(`(${a.id})`))
-      assert.ok(r.stdout.includes('status deferred'))
-      assert.ok(r.stdout.includes(`start ${futureDate(30)}`))
+      assert.ok(r.stdout.includes(`id: ${a.id}`))
+      assert.ok(r.stdout.includes('  status: deferred'))
+      assert.ok(r.stdout.includes(`  start: ${futureDate(30)}`))
     })
 
     it('past-due scheduled item appears in dashboard active actions', () => {
@@ -840,8 +867,8 @@ describe('start dates', () => {
       writeFileSync(path, JSON.stringify(raw))
 
       const r = cli()
-      assert.match(r.stdout, /^# Active actions \(1\)$/m)
-      assert.ok(r.stdout.includes(`(${a.id})`))
+      assert.match(r.stdout, /^ACTIVE ACTIONS \[1\]:$/m)
+      assert.ok(r.stdout.includes(`id: ${a.id}`))
     })
 
     it('parent project deferred hides scheduled child from dashboard', () => {
@@ -849,7 +876,7 @@ describe('start dates', () => {
       const child = addAction('child', { deferred: true, project: proj.id, start: futureDate(14) })
       cli('defer', proj.id)
       const r = cli()
-      assert.ok(!r.stdout.includes(`(${child.id})`))
+      assert.ok(!r.stdout.includes(`id: ${child.id}`))
     })
   })
 
@@ -874,8 +901,9 @@ describe('start dates', () => {
       }
       writeFileSync(join(dataDir, 'store.json'), JSON.stringify(v03))
       const r = cli()
-      assert.match(r.stdout, /^# Active actions \(1\)$/m)
-      assert.ok(r.stdout.includes('(aabbccdd) Old action'))
+      assert.match(r.stdout, /^ACTIVE ACTIONS \[1\]:$/m)
+      assert.ok(r.stdout.includes('id: aabbccdd'))
+      assert.ok(r.stdout.includes('title: "Old action"'))
     })
   })
 })
@@ -1030,15 +1058,15 @@ describe('todo list with deadlines', () => {
   it('includes active deadlines under the dashboard deadlines bucket', () => {
     const d = addDeadlineItem('Q3', { date: FUTURE })
     const r = cli()
-    assert.match(r.stdout, /^# Deadlines \(1\)$/m)
-    assert.ok(r.stdout.includes(`(${d.id})`))
+    assert.match(r.stdout, /^DEADLINES \[1\]:$/m)
+    assert.ok(r.stdout.includes(`id: ${d.id}`))
   })
 
   it('hides dropped deadlines from dashboard', () => {
     const d = addDeadlineItem('drop me', { date: FUTURE })
     cli('drop', d.id)
     const r = cli()
-    assert.doesNotMatch(r.stdout, /^# Deadlines/m)
+    assert.doesNotMatch(r.stdout, /^DEADLINES/m)
   })
 
   it('hides past-date deadlines from dashboard (via direct store write)', () => {
@@ -1059,7 +1087,7 @@ describe('todo list with deadlines', () => {
       JSON.stringify({ items: [past], lists: [] }, null, 2) + '\n',
     )
     const r = cli()
-    assert.doesNotMatch(r.stdout, /^# Deadlines/m)
+    assert.doesNotMatch(r.stdout, /^DEADLINES/m)
   })
 
   it('past + dropped deadlines are reachable via `list deadlines`', () => {
@@ -1067,9 +1095,9 @@ describe('todo list with deadlines', () => {
     const d2 = addDeadlineItem('drop me', { date: FUTURE })
     cli('drop', d2.id)
     const r = cli('list', 'deadlines')
-    assert.ok(r.stdout.includes(`(${d1.id})`))
-    assert.ok(r.stdout.includes(`(${d2.id})`))
-    assert.ok(r.stdout.includes('status dropped'))
+    assert.ok(r.stdout.includes(`id: ${d1.id}`))
+    assert.ok(r.stdout.includes(`id: ${d2.id}`))
+    assert.ok(r.stdout.includes('  status: dropped'))
   })
 
   it('hides deadlines whose parent project is deferred from the dashboard', () => {
@@ -1077,6 +1105,6 @@ describe('todo list with deadlines', () => {
     const d = addDeadlineItem('child', { date: FUTURE, project: proj.id })
     cli('defer', proj.id)
     const r = cli()
-    assert.ok(!r.stdout.includes(`(${d.id})`))
+    assert.ok(!r.stdout.includes(`id: ${d.id}`))
   })
 })

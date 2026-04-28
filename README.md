@@ -1,7 +1,7 @@
 # @telepath-computer/todo
 
 A GTD-style task and project CLI. Designed for LLM agents: read commands
-return narrative markdown by default (with structured Hints surfacing what
+emit YAML-like `key: value` blocks (with a `HINTS:` section surfacing what
 the dashboard hides); mutation commands return canonical entity JSON.
 Humans can read it too. Stable nanoid refs throughout.
 
@@ -31,7 +31,7 @@ un-drops); the date passing is what retires them.
 
 The dashboard (`todo` with no subcommand) shows what's *live*: active
 actions, waiting items, upcoming deadlines, active projects — plus a
-`# Hints` section flagging stuff the dashboard would otherwise hide
+`HINTS:` section flagging stuff the dashboard would otherwise hide
 (recent lapsed deadlines, stalled projects, stale waiting, deferred
 queue size). Terminal items, dropped deadlines, and past-date deadlines
 stay out of the way; reach them with `todo list <type>`.
@@ -80,13 +80,23 @@ $ todo add waiting --title "Cover art from designer" --project Vh8XLm2k
 
 $ todo add deadline --title "Q3 launch" --date "next quarter end" --project Vh8XLm2k
 
-$ todo list
-{
-  "active_actions":  [ ... ],
-  "active_projects": [ ... ],
-  "deadlines":       [ ... ],
-  "waiting":         [ ... ]
-}
+$ todo
+ACTIVE ACTIONS [1]:
+
+- id: K3jLm9pQ
+  title: "Find guests for E14"
+  due: 2026-04-28 (tomorrow)
+  project: Telepath [Vh8XLm2k]
+
+WAITING [1]:
+
+- id: pq3LmXyZ
+  title: "Cover art from designer"
+  project: Telepath [Vh8XLm2k]
+  age: 0 days
+
+DEADLINES [1]:
+... etc.
 
 $ todo complete K3jLm9pQ          # done
 $ todo activate K3jLm9pQ          # changed your mind: bring it back live
@@ -95,7 +105,7 @@ $ todo activate K3jLm9pQ          # changed your mind: bring it back live
 ## Storage
 
 Data lives at `~/.todo/data/store.json`. Override with `TODO_DATA_DIR` or
-`todo set-data-dir <abs-path>` (writes `~/.todo/config.json`). The store is
+`todo config data_dir <abs-path>` (writes `~/.todo/config.json`). The store is
 pretty-printed JSON with sorted keys — safe to commit, sync, or hand-edit.
 Single writer at a time.
 

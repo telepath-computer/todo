@@ -30,7 +30,7 @@ describe('recentLapsedDeadlines', () => {
     }).store
     const out = recentLapsedDeadlines(s, TODAY)
     assert.deepEqual(out, [
-      "- (D1) Tax filing day deadline passed 4 days ago. Confirm with the user it's grokked, then `todo drop D1`.",
+      "- \"Tax filing day\" [D1] deadline passed 4 days ago. Confirm with the user it's grokked, then `todo drop D1`.",
     ])
   })
 
@@ -85,7 +85,7 @@ describe('stalledActiveProjects', () => {
     s = addDeadline(s, { id: 'D1', created_at: T0, title: 'launch', date: '2026-09-01', project: 'P1' }).store
     const out = stalledActiveProjects(s, TODAY)
     assert.deepEqual(out, [
-      '- (P1) Telepath: no active actions, 1 waiting, 1 deadline. Either blocked on a waiting item, needs a next action defined, or consider `todo defer P1`.',
+      '- "Telepath" [P1]: no active actions, 1 waiting, 1 deadline. Either blocked on a waiting item, needs a next action defined, or consider `todo defer P1`.',
     ])
   })
 
@@ -133,7 +133,7 @@ describe('staleWaiting', () => {
       title: 'Cover art',
     }).store
     const out = staleWaiting(s, TODAY)
-    assert.deepEqual(out, ['- (W1) Cover art waiting 12 days. Worth a follow-up?'])
+    assert.deepEqual(out, ['- "Cover art" [W1] waiting 12 days. Worth a follow-up?'])
   })
 
   it('does not flag waiting items 7 days old or younger', () => {
@@ -207,9 +207,9 @@ describe('renderHints', () => {
     const out = renderHints(s, TODAY)
     const lines = out.trim().split('\n')
     assert.equal(lines.length, 4)
-    assert.ok(lines[0].includes('Tax day deadline passed'))
-    assert.ok(lines[1].includes('Telepath: no active actions'))
-    assert.ok(lines[2].includes('Cover art waiting 12 days'))
+    assert.ok(lines[0].includes('"Tax day"') && lines[0].includes('deadline passed'))
+    assert.ok(lines[1].includes('"Telepath"') && lines[1].includes('no active actions'))
+    assert.ok(lines[2].includes('"Cover art"') && lines[2].includes('waiting 12 days'))
     assert.ok(lines[3].includes('1 deferred item hidden'))
     assert.ok(out.endsWith('\n'))
   })

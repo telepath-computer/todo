@@ -1,8 +1,8 @@
 # todo — spec
 
 JSON-storage CLI for GTD-style projects, actions, waiting items, and deadlines.
-Agent-first: read commands return narrative markdown by default (with
-structured Hints surfacing what the dashboard hides); mutation commands
+Agent-first: read commands return YAML-like structured blocks (with a
+`HINTS:` section surfacing what the dashboard hides); mutation commands
 return canonical entity JSON.
 
 ## Storage
@@ -15,7 +15,7 @@ return canonical entity JSON.
 ```
 
 - Data file: `<data-dir>/store.json`. Default data-dir is `~/.todo/data/`.
-- Resolution order: `TODO_DATA_DIR` env var → `dataDir` in `~/.todo/config.json` → default.
+- Resolution order: `TODO_DATA_DIR` env var → `data_dir` in `~/.todo/config.json` → default.
 - All data-dir paths must be **absolute**. Relative paths are rejected at every entry.
 - Atomic writes via tmpfile + rename. Pretty JSON, sorted keys, trailing newline.
 
@@ -23,7 +23,7 @@ return canonical entity JSON.
 
 ```json
 {
-  "dataDir": "/Users/rupert/Dropbox/todo"
+  "data_dir": "/Users/rupert/Dropbox/todo"
 }
 ```
 
@@ -143,18 +143,19 @@ up across both `lists` and `items`.
 
 ## CLI surface
 
-Read commands return markdown narrative by default — designed for an
-LLM agent (or human) reading the output, not for `jq` piping. Mutation
-commands still return canonical entity JSON. Errors are plain text on
-stderr with non-zero exit.
+Read commands emit YAML-like structured blocks: `SECTION [N]:` headings
+and per-item `- key: value` blocks (2-space indented continuations).
+Designed for an LLM agent (or human) reading the output. Mutation
+commands return canonical entity JSON. Errors are plain text on stderr
+with non-zero exit.
 
 ### Reads
 
 | Command | Returns |
 |---|---|
-| `todo` (bare, no subcommand) | The dashboard: live items + a `# Hints` section if any trigger fires. |
+| `todo` (bare, no subcommand) | The dashboard: live items + a `HINTS:` section if any trigger fires. |
 | `todo list <type>` | Flat enumeration of every item of that type (any status, including completed/dropped/past-date). `<type>` ∈ `actions`, `projects`, `deadlines`, `waiting`. |
-| `todo show <id>` | One entity, with key fields. Projects also embed `## Active actions`, `## Deferred actions`, `## Waiting`, `## Deadlines` scoped to the project (regardless of the project's own status). |
+| `todo show <id>` | One entity with its fields. Projects also embed `ACTIVE ACTIONS`, `DEFERRED ACTIONS`, `WAITING`, `DEADLINES` sub-buckets scoped to the project (regardless of the project's own status). |
 
 **Dashboard buckets** (compared against host-local `YYYY-MM-DD`):
 
@@ -169,7 +170,7 @@ project are hidden from the dashboard. Terminal items, dropped deadlines,
 and past-date deadlines are not on the dashboard — reach them via
 `todo list <type>` (which shows everything regardless of status).
 
-**Hints** (`# Hints` section appended to dashboard output and the project
+**Hints** (`HINTS:` section appended to dashboard output and the project
 case of `show`). See [hints.md](./hints.md) for the catalog. v1 surfaces:
 
 1. Recent lapsed deadlines (date passed within last 7 days, still active).
@@ -179,24 +180,38 @@ case of `show`). See [hints.md](./hints.md) for the catalog. v1 surfaces:
 
 Section is omitted entirely when no triggers fire.
 
-**Item line format** (used by dashboard, list, project sub-buckets):
+**Item block format** (used by dashboard buckets, `list <type>`, project sub-buckets):
 
 ```
-- (<id>) <title> — <modifier1>, <modifier2>, …
+- id: <id>
+  title: "<title>"
+  <other fields...>
 ```
 
-Modifiers, in canonical order, when applicable:
-- `due <date> (<rel>)` — actions only. `<rel>`: `today`, `tomorrow`, `in N days`, `overdue N days`.
-- `start <date> (<rel>)` — actions with a `start_at`.
-- `date <date> (<rel>)` — deadlines.
-- `project <Title> (<id>)` — items with a parent project.
-- `waiting <N> days` — waiting items.
-- `status <s>` — only in `list <type>` output (status not implied by bucket).
-- `closed <ts>` — only in `list <type>` output, for terminal items.
-- `note: "<truncated to ~150 chars>"` — when present.
+Field order is canonical and contextual. Only fields with values are
+emitted (no `<none>` placeholders for null).
 
-For projects in `Active projects`: `<N> action(s), <M> waiting, <K> deadline(s)`
-counts modifier (zero counts skipped).
+| Field | Where it appears |
+|---|---|
+| `id`, `title` | always; `title` is double-quoted |
+| `status` | only in `list <type>` (in dashboard buckets and `show` sub-buckets, status is implied by the bucket) |
+| `due: <date> (<rel>)` | actions with a due date. `<rel>`: `today`, `tomorrow`, `in N days`, `overdue N days` |
+| `start: <date> (<rel>)` | actions with a `start_at` |
+| `date: <date> (<rel>)` | deadlines |
+| `project: <Title> [<id>]` | items with a parent project, except inside a `show` of that same project |
+| `age: <N> days` | active waiting items |
+| `actions: <N>`, `waiting: <N>`, `deadlines: <N>` | projects (count of live, non-terminal children) |
+| `closed: <ts>` | only in `list <type>`, for terminal items |
+| `note: "<text>"` | when set; truncated to ~150 chars at a soft word boundary |
+
+`todo show <id>` emits a header line `<TYPE>: "<title>" [<id>]` followed
+by flush-left key/value lines (no indent, no leading dash) for the
+entity's body fields, plus a `created: <ts>` field at the end. For
+projects: header, body (status/closed/created/note only — no child
+counts), then `ACTIVE ACTIONS [N]:`, `DEFERRED ACTIONS [N]:`,
+`WAITING [N]:`, `DEADLINES [N]:` sub-buckets enumerating the children.
+`show` does not emit a `HINTS:` section — Hints are dashboard-scoped
+(global to the store), not project-scoped.
 
 ### Create
 
@@ -295,27 +310,32 @@ Entity-type rules:
 ### Configuration
 
 ```
-todo set-data-dir <abs-path>     # writes ~/.todo/config.json
-todo config                      # prints { dataDir, source }
+todo config                      # list all keys, e.g. `data_dir: <path>`
+todo config <key>                # read one key
+todo config <key> <value>        # write one key (returns canonical JSON)
 ```
 
-`source` is `"env"`, `"config"`, or `"default"`.
+Known keys: `data_dir`. Writes go to `~/.todo/config.json`. Resolution
+order is `TODO_DATA_DIR` env → `data_dir` from config file → default
+(`~/.todo/data`). The bare/read forms always print the *resolved* value.
 
 ## Output
 
-Read commands (`todo`, `todo list <type>`, `todo show <id>`) emit markdown
-narrative — `# Heading (count)` sections, `- (id) title — modifiers` lines,
-optional `# Hints` (or `## Hints` inside a project show) section. Designed
-to be read by an LLM agent (or human) without a parser. Item ids are
-8-char nanoids in `(parens)`, stable and grep-friendly.
+Read commands (`todo`, `todo list <type>`, `todo show <id>`) emit
+YAML-like blocks — `SECTION [N]:` headings with one `- key: value`
+block per item (continuation lines indented two spaces), an optional
+`HINTS:` section appended last. Designed to be scanned by an LLM agent
+(or human) without a parser. Item ids appear as `id: <nanoid>` (no
+parens) and project refs as `<Title> [<id>]`.
 
-Mutation commands (`todo add`, `todo edit`, lifecycle verbs, `set-data-dir`,
-`config`) return the canonical entity as pretty-printed sorted-key JSON
-with a trailing newline — the agent just performed an action and wants
-the resulting record back.
+Mutation commands (`todo add`, `todo edit`, lifecycle verbs,
+`set-data-dir`, `config`) return the canonical entity as pretty-printed
+sorted-key JSON with a trailing newline — the agent just performed an
+action and wants the resulting record back.
 
-Storage shape (`store.json`) is unchanged JSON: same on-disk schema, same
-mutation-response shape. The format flip is purely on the read commands.
+Storage shape (`store.json`) is unchanged JSON: same on-disk schema,
+same mutation-response shape. The format change is purely on the read
+commands.
 
 ## Errors
 

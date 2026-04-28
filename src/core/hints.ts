@@ -16,7 +16,7 @@ export function recentLapsedDeadlines(s: Store, today: string): string[] {
     const daysAgo = -delta
     if (daysAgo > LAPSED_DEADLINE_RECENCY_DAYS) continue
     out.push(
-      `- (${i.id}) ${i.title} deadline passed ${daysAgo} ${plural(daysAgo, 'day')} ago. ` +
+      `- "${i.title}" [${i.id}] deadline passed ${daysAgo} ${plural(daysAgo, 'day')} ago. ` +
         `Confirm with the user it's grokked, then \`todo drop ${i.id}\`.`,
     )
   }
@@ -32,7 +32,7 @@ export function stalledActiveProjects(s: Store, today: string): string[] {
     if (!counts.hasAnyChildren) continue
     if (counts.activeActions > 0) continue
     out.push(
-      `- (${p.id}) ${p.title}: no active actions, ${counts.waiting} waiting, ` +
+      `- "${p.title}" [${p.id}]: no active actions, ${counts.waiting} waiting, ` +
         `${counts.deadlines} ${plural(counts.deadlines, 'deadline')}. Either blocked on a waiting ` +
         `item, needs a next action defined, or consider \`todo defer ${p.id}\`.`,
     )
@@ -47,7 +47,7 @@ export function staleWaiting(s: Store, today: string): string[] {
     if (i.status !== 'active') continue
     const days = daysSince(i.created_at, today)
     if (days <= STALE_WAITING_DAYS) continue
-    out.push(`- (${i.id}) ${i.title} waiting ${days} days. Worth a follow-up?`)
+    out.push(`- "${i.title}" [${i.id}] waiting ${days} days. Worth a follow-up?`)
   }
   return out
 }

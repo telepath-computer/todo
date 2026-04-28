@@ -6,7 +6,7 @@ import {
   addProjectCmd,
   addWaitingCmd,
 } from './commands/add.js'
-import { configCmd, setDataDirCmd } from './commands/config.js'
+import { configCmd } from './commands/config.js'
 import { editCmd } from './commands/edit.js'
 import {
   activateCmd,
@@ -179,17 +179,14 @@ program
   })
 
 program
-  .command('set-data-dir <path>')
-  .description('Set the data directory (writes ~/.todo/config.json)')
-  .action((path: string) => {
-    run(() => setDataDirCmd(path))
-  })
-
-program
-  .command('config')
-  .description('Show resolved CLI configuration')
-  .action(() => {
-    run(() => configCmd())
+  .command('config [key] [value]')
+  .description(
+    'Read or write CLI configuration. Bare `config` lists all keys. ' +
+      '`config <key>` reads one key. `config <key> <value>` writes it. ' +
+      'Known keys: data_dir.',
+  )
+  .action((key?: string, value?: string) => {
+    run(() => configCmd(key, value))
   })
 
 program.parse()

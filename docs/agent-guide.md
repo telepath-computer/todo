@@ -1,9 +1,10 @@
 # Agent guide
 
 A recommended system-prompt snippet for an LLM agent that consumes the
-`todo` CLI. The CLI is agent-first — narrative output by default, stable
-nanoid refs, structured-prose Hints. This guide tells the agent how to
-read and act on what it gets.
+`todo` CLI. The CLI is agent-first — read commands emit YAML-like
+key/value blocks with stable nanoid refs; mutations return canonical
+entity JSON. This guide tells the agent how to read and act on what it
+gets.
 
 ## Recommended system-prompt snippet
 
@@ -12,11 +13,12 @@ read and act on what it gets.
 > see the current dashboard — that's the place to orient yourself before
 > deciding what to do next.
 >
-> The dashboard shows live items only: active actions, waiting,
-> upcoming-or-today deadlines, active projects. It hides anything that's
-> deferred, completed, dropped, or past-date — by design.
+> The dashboard prints `SECTION [N]:` headings (active actions, waiting,
+> deadlines, active projects) followed by per-item blocks of `- key: value`
+> lines. Live items only — anything deferred, completed, dropped, or
+> past-date is hidden by design.
 >
-> If the dashboard ends with a `# Hints` section, treat each bullet as
+> If the dashboard ends with a `HINTS:` section, treat each bullet as
 > something to weigh into the conversation:
 > - **Recent lapsed deadline.** A deadline whose date passed within the
 >   last week. Surface it to the user, get confirmation, and run
@@ -35,7 +37,9 @@ read and act on what it gets.
 > To enumerate everything (including completed/dropped/past-date) for a
 > given type, use `todo list actions` / `todo list projects` /
 > `todo list deadlines` / `todo list waiting`. To drill into one entity,
-> `todo show <id>` — for projects this also shows their children.
+> `todo show <id>` — for projects this also shows their children grouped
+> by `ACTIVE ACTIONS`, `DEFERRED ACTIONS`, `WAITING`, `DEADLINES`.
+> `todo show` does not surface Hints; that's a dashboard-only signal.
 >
 > Mutation commands (`todo add`, `todo edit`, `todo activate`, `todo defer`,
 > `todo complete`, `todo drop`) return canonical entity JSON — useful for
@@ -44,13 +48,18 @@ read and act on what it gets.
 ## Conventions worth knowing
 
 - **Item ids are 8-char nanoids** in `[0-9a-zA-Z]`. They appear as
-  `(id)` at the start of every list line and in the `# <Type> — <title> (<id>)`
-  show header. Stable, grep-friendly, safe to embed in conversation.
-- **Dates are local-tz `YYYY-MM-DD`.** Relative phrasing on item lines
-  (`due X (in N days)`, `date X (passed N days ago)`, `start X (revives in N days)`)
-  is computed by the CLI. Don't recompute.
+  `id: <nanoid>` at the top of every block, in the `<TYPE>: "<title>" [<id>]`
+  show header, and in inline refs like `project: <Title> [<id>]`.
+  Stable, grep-friendly, safe to embed in conversation.
+- **Dates are local-tz `YYYY-MM-DD`.** Relative phrasing on date fields
+  (`due: 2026-04-28 (tomorrow)`, `date: 2026-09-30 (in 156 days)`,
+  `start: 2026-05-04 (revives in 7 days)`) is computed by the CLI.
+  Don't recompute.
+- **Status is implicit on the dashboard** (the bucket already says it).
+  In `todo list <type>` output, every block carries a `status:` field
+  because the listing mixes statuses.
 - **Deadlines are not tasks.** No `complete`. They lapse on their date.
   Drop one if it's cancelled.
-- **Scheduled actions auto-revive.** A deferred action with `start_at` in
-  the future is hidden until that day, when it appears in `Active actions`.
-  No agent intervention needed.
+- **Scheduled actions auto-revive.** A deferred action with `start_at`
+  in the future is hidden until that day, when it appears under
+  `ACTIVE ACTIONS` on the dashboard. No agent intervention needed.
