@@ -328,8 +328,8 @@ block per item (continuation lines indented two spaces), an optional
 (or human) without a parser. Item ids appear as `id: <nanoid>` (no
 parens) and project refs as `<Title> [<id>]`.
 
-Mutation commands (`todo add`, `todo edit`, lifecycle verbs,
-`set-data-dir`, `config`) return the canonical entity as pretty-printed
+Mutation commands (`todo add`, `todo edit`, lifecycle verbs, and
+`config <key> <value>`) return the canonical entity as pretty-printed
 sorted-key JSON with a trailing newline — the agent just performed an
 action and wants the resulting record back.
 
