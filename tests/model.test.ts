@@ -9,6 +9,7 @@ import {
   addDeadline,
   addProject,
   addWaiting,
+  appendNote,
   deferredActions,
   deferredProjects,
   editItem,
@@ -630,5 +631,75 @@ describe('liveActions / liveWaiting do not surface deadlines', () => {
     const s = seedWithDeadlines()
     const types = new Set(liveWaiting(s).map((w) => w.type))
     assert.deepEqual([...types], ['waiting'])
+  })
+})
+
+// appendNote ----------------------------------------------------------
+
+describe('appendNote', () => {
+  it('sets note when previously null on a project', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
+    const { entity } = appendNote(s, 'P1', 'first fact')
+    assert.equal((entity as ProjectList).note, 'first fact')
+  })
+
+  it('joins with a blank line when note already exists on a project', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P', note: 'existing' }).store
+    const { entity } = appendNote(s, 'P1', 'second fact')
+    assert.equal((entity as ProjectList).note, 'existing\n\nsecond fact')
+  })
+
+  it('joins multiple appends in order', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
+    s = appendNote(s, 'P1', 'one').store
+    s = appendNote(s, 'P1', 'two').store
+    s = appendNote(s, 'P1', 'three').store
+    assert.equal((findList(s, 'P1') as ProjectList).note, 'one\n\ntwo\n\nthree')
+  })
+
+  it('works on actions', () => {
+    let s: Store = EMPTY_STORE
+    s = addAction(s, { id: 'A1', created_at: T0, title: 'A', status: 'active' }).store
+    const r1 = appendNote(s, 'A1', 'fact 1')
+    assert.equal((r1.entity as ActionItem).note, 'fact 1')
+    const r2 = appendNote(r1.store, 'A1', 'fact 2')
+    assert.equal((r2.entity as ActionItem).note, 'fact 1\n\nfact 2')
+  })
+
+  it('works on waiting items', () => {
+    let s: Store = EMPTY_STORE
+    s = addWaiting(s, { id: 'W1', created_at: T0, title: 'W' }).store
+    const { entity } = appendNote(s, 'W1', 'follow-up sent')
+    assert.equal((entity as WaitingItem).note, 'follow-up sent')
+  })
+
+  it('works on deadlines', () => {
+    let s: Store = EMPTY_STORE
+    s = addDeadline(s, { id: 'D1', created_at: T0, title: 'Q3', date: FUTURE }).store
+    const { entity } = appendNote(s, 'D1', 'fixed in stone')
+    assert.equal((entity as DeadlineItem).note, 'fixed in stone')
+  })
+
+  it('rejects empty body', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
+    assert.throws(() => appendNote(s, 'P1', ''), InvalidArgument)
+    assert.throws(() => appendNote(s, 'P1', '   '), InvalidArgument)
+  })
+
+  it('throws NotFound on unknown id', () => {
+    assert.throws(() => appendNote(EMPTY_STORE, 'NOPE', 'x'), NotFound)
+  })
+
+  it('does not mutate the input store', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P', note: 'a' }).store
+    const beforeLists = s.lists
+    appendNote(s, 'P1', 'b')
+    assert.equal(s.lists, beforeLists)
+    assert.equal((findList(s, 'P1') as ProjectList).note, 'a')
   })
 })

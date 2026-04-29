@@ -202,7 +202,7 @@ emitted (no `<none>` placeholders for null).
 | `age: <N> days` | active waiting items |
 | `actions: <N>`, `waiting: <N>`, `deadlines: <N>` | projects (count of live, non-terminal children) |
 | `closed: <ts>` | only in `list <type>`, for terminal items |
-| `note: "<text>"` | when set; truncated to ~150 chars at a soft word boundary |
+| `note: "<text>"` | when set. Dashboard / `list` / project sub-buckets: newlines flattened to spaces, truncated to ~150 chars at a soft word boundary. `show <id>`: full text un-truncated; rendered as a YAML `\|`-block scalar when the note contains newlines. |
 
 `todo show <id>` emits a header line `<TYPE>: "<title>" [<id>]` followed
 by flush-left key/value lines (no indent, no leading dash) for the
@@ -246,7 +246,8 @@ todo add deadline --title "<text>" --date <date> [--project <id>] [--note <text>
 ```
 todo edit <id> [--active | --deferred | --completed | --dropped]
               [--start <date>]
-              [--title ...] [--note ...] [--due ...] [--project ...] [--date ...]
+              [--title ...] [--note ...] [--note-append ...]
+              [--due ...] [--project ...] [--date ...]
 ```
 
 Field semantics:
@@ -255,6 +256,10 @@ Field semantics:
 - Pass `""` to clear: `--note ""`, `--due ""`, `--project ""`, `--start ""`.
 - `--title ""` is rejected (title is required).
 - `--date ""` is rejected (deadline date is required).
+- `--note-append <text>` appends `<text>` to the existing `note`, joined
+  with a blank line (`\n\n`); if `note` was null, sets it to `<text>`.
+  Empty `--note-append ""` is rejected. `--note` and `--note-append`
+  cannot be used in the same call.
 - `--due` is rejected on projects, waiting items, and deadlines.
 - `--date` is only valid on deadlines; rejected on projects, actions, and
   waiting items. New value must be a future date.
@@ -372,6 +377,8 @@ Plain text on stderr, prefixed with `todo:`, exit code 1.
 | `--start is not allowed on waiting items` | `--start` against a waiting item |
 | `--start is not allowed with --completed / --dropped` | terminal + schedule contradiction |
 | `--start cannot be empty on add` / `... on defer` | `--start ""` on `add action` or `defer` |
+| `--note and --note-append are mutually exclusive` | both flags passed to one `edit` |
+| `body is required and cannot be empty` | `--note-append ""` |
 
 ## Out of scope
 

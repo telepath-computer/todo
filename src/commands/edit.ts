@@ -2,6 +2,7 @@ import { resolveDataDir } from '../core/config.js'
 import { requireFutureDate, resolveDueInput } from '../core/dates.js'
 import { InvalidArgument, NotFound, NothingToEdit } from '../core/errors.js'
 import {
+  appendNote,
   editItem,
   editList,
   findEntity,
@@ -24,6 +25,7 @@ export type EditCmdOpts = {
   start?: string
   title?: string
   note?: string
+  noteAppend?: string
   due?: string
   project?: string
   date?: string
@@ -34,6 +36,10 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
   const store = readStore(dataDir)
   const entity = findEntity(store, id)
   if (!entity) throw new NotFound(`not found: ${id}`)
+
+  if (opts.note !== undefined && opts.noteAppend !== undefined) {
+    throw new InvalidArgument('--note and --note-append are mutually exclusive')
+  }
 
   const wantStatus = resolveWantStatus(opts)
 
@@ -135,6 +141,13 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
       nextStore = result.store
       nextEntity = result.entity
     }
+    didMutate = true
+  }
+
+  if (opts.noteAppend !== undefined) {
+    const result = appendNote(nextStore, id, opts.noteAppend)
+    nextStore = result.store
+    nextEntity = result.entity
     didMutate = true
   }
 

@@ -396,3 +396,81 @@ describe('totalDeferredItems', () => {
     assert.equal(totalDeferredItems(s, TODAY), 3)
   })
 })
+
+// ---- Show: full notes (no truncation, multi-line block scalar) ------
+
+describe('renderShow note rendering', () => {
+  it('renders a single-line note as a quoted scalar in show', () => {
+    let s: Store = EMPTY_STORE
+    const r = addProject(s, { id: 'P1', created_at: T0, title: 'P', note: 'one liner' })
+    s = r.store
+    const out = renderShow(s, TODAY, r.entity)
+    assert.match(out, /^note: "one liner"$/m)
+  })
+
+  it('renders a multi-line note as a block scalar with indented continuation', () => {
+    let s: Store = EMPTY_STORE
+    const note = 'fact one\n\nfact two\n\nfact three'
+    const r = addProject(s, { id: 'P1', created_at: T0, title: 'P', note })
+    s = r.store
+    const out = renderShow(s, TODAY, r.entity)
+    const expected = ['note: |', '  fact one', '  ', '  fact two', '  ', '  fact three'].join('\n')
+    assert.ok(out.includes(expected), `expected block scalar in:\n${out}`)
+  })
+
+  it('does not truncate a long single-line note in show', () => {
+    let s: Store = EMPTY_STORE
+    const long = 'x'.repeat(500)
+    const r = addProject(s, { id: 'P1', created_at: T0, title: 'P', note: long })
+    s = r.store
+    const out = renderShow(s, TODAY, r.entity)
+    assert.ok(out.includes(`note: "${long}"`))
+    assert.ok(!out.includes('…'))
+  })
+
+  it('renders a multi-line note on a non-project entity in show', () => {
+    let s: Store = EMPTY_STORE
+    const r = addAction(s, {
+      id: 'A1',
+      created_at: T0,
+      title: 'A',
+      status: 'active',
+      note: 'line one\nline two',
+    })
+    s = r.store
+    const out = renderShow(s, TODAY, r.entity)
+    assert.ok(out.includes('note: |\n  line one\n  line two'), `got:\n${out}`)
+  })
+
+  it('keeps truncating notes on the dashboard', () => {
+    let s: Store = EMPTY_STORE
+    const long = 'x'.repeat(300)
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P', note: long }).store
+    const out = renderDashboard(s, TODAY)
+    assert.ok(out.includes('…'))
+    assert.ok(!out.includes('x'.repeat(200)))
+  })
+
+  it('keeps truncating notes in list view', () => {
+    let s: Store = EMPTY_STORE
+    const long = 'x'.repeat(300)
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P', note: long }).store
+    const out = renderList(s, TODAY, 'projects')
+    assert.ok(out.includes('…'))
+  })
+
+  it('flattens a multi-line note to a single line on the dashboard', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, {
+      id: 'P1',
+      created_at: T0,
+      title: 'P',
+      note: 'first paragraph\n\nsecond paragraph',
+    }).store
+    const out = renderDashboard(s, TODAY)
+    // No literal newline inside the rendered note value (would break the YAML-ish block).
+    assert.doesNotMatch(out, /note: "first paragraph\n/)
+    // The first paragraph still appears.
+    assert.ok(out.includes('first paragraph'))
+  })
+})

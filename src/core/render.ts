@@ -81,6 +81,26 @@ export function truncateNote(note: string, maxLen = MAX_NOTE_LEN): string {
   return window + '…'
 }
 
+// Collapse newlines for compact (dashboard / list / show-children) views
+// so a multi-line note stays a clean single-line summary inside the
+// YAML-ish key/value block.
+function flattenNote(note: string): string {
+  return note.replace(/\s*\n+\s*/g, ' ')
+}
+
+function compactNoteValue(note: string): string {
+  return quote(truncateNote(flattenNote(note)))
+}
+
+// For single-entity show views: emit the full note un-truncated. Single-line
+// notes stay quoted; multi-line notes use a YAML `|`-block scalar so the
+// surrounding key/value block stays readable.
+function showNoteField(note: string): [string, string] {
+  if (!note.includes('\n')) return ['note', quote(note)]
+  const indented = note.split('\n').map((l) => `  ${l}`).join('\n')
+  return ['note', `|\n${indented}`]
+}
+
 // String quoting -------------------------------------------------------
 // Free-form text values (title, note) are wrapped in double quotes so that
 // embedded colons or whitespace can't be confused with the YAML-ish
@@ -120,7 +140,7 @@ function actionFields(a: ActionItem, s: Store, today: string, ctx: Ctx): [string
     if (ref) f.push(['project', ref])
   }
   if (ctx === 'list' && a.closed_at !== null) f.push(['closed', a.closed_at])
-  if (a.note !== null) f.push(['note', quote(truncateNote(a.note))])
+  if (a.note !== null) f.push(['note', compactNoteValue(a.note)])
   return f
 }
 
@@ -135,7 +155,7 @@ function waitingFields(w: WaitingItem, s: Store, today: string, ctx: Ctx): [stri
   }
   if (w.status === 'active') f.push(['age', ageField(daysSince(w.created_at, today))])
   if (ctx === 'list' && w.closed_at !== null) f.push(['closed', w.closed_at])
-  if (w.note !== null) f.push(['note', quote(truncateNote(w.note))])
+  if (w.note !== null) f.push(['note', compactNoteValue(w.note)])
   return f
 }
 
@@ -150,7 +170,7 @@ function deadlineFields(d: DeadlineItem, s: Store, today: string, ctx: Ctx): [st
     if (ref) f.push(['project', ref])
   }
   if (ctx === 'list' && d.closed_at !== null) f.push(['closed', d.closed_at])
-  if (d.note !== null) f.push(['note', quote(truncateNote(d.note))])
+  if (d.note !== null) f.push(['note', compactNoteValue(d.note)])
   return f
 }
 
@@ -164,7 +184,7 @@ function projectFields(p: ProjectList, s: Store, ctx: Ctx): [string, string][] {
   f.push(['waiting', String(counts.waiting)])
   f.push(['deadlines', String(counts.deadlines)])
   if (ctx === 'list' && p.closed_at !== null) f.push(['closed', p.closed_at])
-  if (p.note !== null) f.push(['note', quote(truncateNote(p.note))])
+  if (p.note !== null) f.push(['note', compactNoteValue(p.note)])
   return f
 }
 
@@ -292,7 +312,7 @@ function renderShowProject(s: Store, today: string, p: ProjectList): string {
   fields.push(['status', p.status])
   if (p.closed_at !== null) fields.push(['closed', p.closed_at])
   fields.push(['created', p.created_at])
-  if (p.note !== null) fields.push(['note', quote(truncateNote(p.note))])
+  if (p.note !== null) fields.push(showNoteField(p.note))
 
   const sections: string[] = []
   sections.push(`PROJECT: ${quote(p.title)} [${p.id}]\n\n${entityBlock(fields)}`)
@@ -343,6 +363,13 @@ function renderShowItem(s: Store, today: string, i: Item): string {
   // Drop id/title — they're in the header line.
   const body = fields.filter(([k]) => k !== 'id' && k !== 'title')
   body.push(['created', i.created_at])
+  // Replace the compact note (from 'list' ctx) with the full-text show form.
+  if (i.note !== null) {
+    const idx = body.findIndex(([k]) => k === 'note')
+    const full = showNoteField(i.note)
+    if (idx >= 0) body[idx] = full
+    else body.push(full)
+  }
   return `${typeName}: ${quote(i.title)} [${i.id}]\n\n${entityBlock(body)}`
 }
 

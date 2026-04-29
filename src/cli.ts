@@ -126,6 +126,7 @@ program
   .option('--start <date>', "start date (action only); '' clears; with future date implies --deferred")
   .option('--title <text>', 'new title')
   .option('--note <text>', "note text; '' clears")
+  .option('--note-append <text>', 'append text to the existing note (joins with a blank line)')
   .option('--due <date>', "due date; '' clears (action only)")
   .option('--project <id>', "parent project id; '' detaches (item only)")
   .option('--date <date>', 'deadline date (deadline only; must be future)')
@@ -140,6 +141,7 @@ program
         start?: string
         title?: string
         note?: string
+        noteAppend?: string
         due?: string
         project?: string
         date?: string

@@ -217,6 +217,34 @@ export function addDeadline(s: Store, input: AddDeadlineInput): { store: Store; 
   return { store: { ...s, items: [...s.items, entity] }, entity }
 }
 
+// Note append ----------------------------------------------------------
+
+export function appendNote(
+  s: Store,
+  id: string,
+  body: string,
+): { store: Store; entity: List | Item } {
+  if (body.trim().length === 0) {
+    throw new InvalidArgument('body is required and cannot be empty')
+  }
+  const e = requireEntity(s, id)
+  const next = e.note === null ? body : `${e.note}\n\n${body}`
+  if (e.type === 'project') {
+    const updated: ProjectList = { ...e, note: next }
+    return { store: replaceList(s, updated), entity: updated }
+  }
+  if (e.type === 'action') {
+    const updated: ActionItem = { ...e, note: next }
+    return { store: replaceItem(s, updated), entity: updated }
+  }
+  if (e.type === 'waiting') {
+    const updated: WaitingItem = { ...e, note: next }
+    return { store: replaceItem(s, updated), entity: updated }
+  }
+  const updated: DeadlineItem = { ...e, note: next }
+  return { store: replaceItem(s, updated), entity: updated }
+}
+
 // Edit -----------------------------------------------------------------
 
 export type EditListPatch = {

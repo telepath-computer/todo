@@ -444,6 +444,92 @@ describe('todo edit <id>', () => {
   })
 })
 
+// ---- Edit --note-append ---------------------------------------------
+
+describe('todo edit <id> --note-append', () => {
+  it('sets the note when previously null', () => {
+    const a = addAction('A', { active: true })
+    assert.equal(a.note, null)
+    const r = cli('edit', a.id, '--note-append', 'Tax office phone: 555-1234')
+    assert.equal(r.code, 0, r.stderr)
+    const out = parseJson<Action>(r.stdout)
+    assert.equal(out.note, 'Tax office phone: 555-1234')
+  })
+
+  it('appends to an existing note with a blank line between', () => {
+    const a = addAction('A', { active: true, note: 'first' })
+    const r = cli('edit', a.id, '--note-append', 'second')
+    assert.equal(r.code, 0, r.stderr)
+    const out = parseJson<Action>(r.stdout)
+    assert.equal(out.note, 'first\n\nsecond')
+  })
+
+  it('chains multiple appends', () => {
+    const p = addProject('P', { note: 'one' })
+    cli('edit', p.id, '--note-append', 'two')
+    const r = cli('edit', p.id, '--note-append', 'three')
+    const out = parseJson<Project>(r.stdout)
+    assert.equal(out.note, 'one\n\ntwo\n\nthree')
+  })
+
+  it('works on projects, actions, waiting, and deadlines', () => {
+    const p = addProject('P')
+    const a = addAction('A', { active: true })
+    const w = addWaitingItem('W')
+    const d = addDeadlineItem('D', { date: FUTURE })
+    for (const id of [p.id, a.id, w.id, d.id]) {
+      const r = cli('edit', id, '--note-append', 'x')
+      assert.equal(r.code, 0, r.stderr)
+      const out = parseJson<{ note: string | null }>(r.stdout)
+      assert.equal(out.note, 'x')
+    }
+  })
+
+  it('rejects empty body', () => {
+    const a = addAction('A', { active: true })
+    const r = cli('edit', a.id, '--note-append', '')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /empty/i)
+  })
+
+  it('rejects --note and --note-append in the same call', () => {
+    const a = addAction('A', { active: true, note: 'existing' })
+    const r = cli('edit', a.id, '--note', 'replaced', '--note-append', 'extra')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /mutually exclusive/i)
+  })
+
+  it('combines with other field flags in one call', () => {
+    const a = addAction('A', { active: true })
+    const r = cli('edit', a.id, '--note-append', 'fact', '--title', 'A renamed')
+    assert.equal(r.code, 0, r.stderr)
+    const out = parseJson<Action>(r.stdout)
+    assert.equal(out.title, 'A renamed')
+    assert.equal(out.note, 'fact')
+  })
+
+  it('show renders the full multi-line note un-truncated as a block scalar', () => {
+    const p = addProject('P')
+    cli('edit', p.id, '--note-append', 'Tax office: 555-1234')
+    cli('edit', p.id, '--note-append', 'Sarah prefers Tuesdays')
+    const r = cli('show', p.id)
+    assert.equal(r.code, 0, r.stderr)
+    assert.ok(r.stdout.includes('note: |'), r.stdout)
+    assert.ok(r.stdout.includes('  Tax office: 555-1234'))
+    assert.ok(r.stdout.includes('  Sarah prefers Tuesdays'))
+  })
+
+  it('persists the joined note to disk', () => {
+    const a = addAction('A', { active: true, note: 'one' })
+    cli('edit', a.id, '--note-append', 'two')
+    const store = readJson<{ items: Array<{ id: string; note: string | null }> }>(
+      join(dataDir, 'store.json'),
+    )
+    const stored = store.items.find((i) => i.id === a.id)
+    assert.equal(stored?.note, 'one\n\ntwo')
+  })
+})
+
 // ---- Projects add/edit ----------------------------------------------
 
 describe('todo projects add/edit', () => {
