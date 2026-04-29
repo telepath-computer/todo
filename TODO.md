@@ -26,6 +26,25 @@ Backlog for `todo`. Rough buckets; within each, earlier items land first.
 
 ## P2 — schema extensions
 
+- **Notes as a first-class entity.** Replace today's two stringly-typed
+  surfaces — the per-entity `note: string \| null` field and the
+  `meta.context` singleton — with a single `note` entity type:
+  `{ id, type: 'note', body, title?, pinned: boolean, project: id \| null, created_at }`.
+  CLI: `todo add note --pinned --body "<text>"` (top-level pinned, replaces
+  `todo context`); `todo add note --project <id> --title "Overview" --body "<text>"`
+  (entity-attached, replaces the per-project `note` field);
+  `todo add note --title "Links" --body "<markdown with refs>"` (free-floating,
+  unpinned, untethered — a parking spot for "see Notes/Q3.md", reference
+  lists, ideas park, etc.). Pinned notes always render at the top of the
+  dashboard; entity-attached notes render under their parent in `show <id>`;
+  free-floating untitled-or-titled notes are reachable via `todo list notes`
+  and surfaced periodically (review digest / Hints when stale). Three
+  surfaces, one shape: `pinned` flag + optional `project` parent. `todo list
+  notes`, `todo show <note-id>`, `todo edit <note-id> --body ...`,
+  `todo trash <id>` (when trash lands). Migration: each existing entity's
+  `note` becomes a single attached note record; `meta.context` becomes a
+  single pinned note. Drops three ad-hoc surfaces (`--note-append`,
+  `todo context`, free-form `note` field) for one uniform entity.
 - **Agenda items.** `type: "agenda"` with `with: string` (person to discuss).
   Fits the discriminated-subtype model — new flag on `todo add`, new bucket
   in list views.
