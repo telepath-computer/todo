@@ -537,4 +537,61 @@ describe('sub-projects rendering', () => {
     const rootBlock = out.split('- id: R')[1]?.split('- id: C')[0] ?? ''
     assert.doesNotMatch(rootBlock, /\bparent:/)
   })
+
+  it('parent count rolls up sub-project items as a parenthetical suffix', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'R', created_at: T0, title: 'Root' }).store
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    s = addAction(s, { id: 'A', created_at: T0, title: 'a', status: 'active', project: 'C' }).store
+    s = addWaiting(s, { id: 'W', created_at: T0, title: 'w', project: 'C' }).store
+    const out = renderDashboard(s, TODAY)
+    const rootBlock = out.split('- id: R')[1]?.split('- id: C')[0] ?? ''
+    assert.match(rootBlock, /actions: 0 \(\+1 in sub-projects\)/)
+    assert.match(rootBlock, /waiting: 0 \(\+1 in sub-projects\)/)
+    assert.match(rootBlock, /deadlines: 0$/m)
+  })
+
+  it('does not append a sub-projects suffix on child project blocks', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'R', created_at: T0, title: 'Root' }).store
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    s = addAction(s, { id: 'A', created_at: T0, title: 'a', status: 'active', project: 'C' }).store
+    const out = renderDashboard(s, TODAY)
+    const childBlock = out.split('- id: C')[1] ?? ''
+    assert.doesNotMatch(childBlock, /sub-projects/)
+  })
+
+  it('omits the suffix when sub-projects have no items', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'R', created_at: T0, title: 'Root' }).store
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    const out = renderDashboard(s, TODAY)
+    const rootBlock = out.split('- id: R')[1]?.split('- id: C')[0] ?? ''
+    assert.match(rootBlock, /actions: 0$/m)
+    assert.doesNotMatch(rootBlock, /sub-projects/)
+  })
+
+  it('combines own and sub-project items: parent shows N (+M in sub-projects)', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'R', created_at: T0, title: 'Root' }).store
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    s = addAction(s, { id: 'A1', created_at: T0, title: 'parent action', status: 'active', project: 'R' }).store
+    s = addAction(s, { id: 'A2', created_at: T0, title: 'child action', status: 'active', project: 'C' }).store
+    s = addAction(s, { id: 'A3', created_at: T0, title: 'child action 2', status: 'active', project: 'C' }).store
+    const out = renderDashboard(s, TODAY)
+    const rootBlock = out.split('- id: R')[1]?.split('- id: C')[0] ?? ''
+    assert.match(rootBlock, /actions: 1 \(\+2 in sub-projects\)/)
+  })
+
+  it('rollup excludes terminal items', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'R', created_at: T0, title: 'Root' }).store
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    s = addAction(s, { id: 'A1', created_at: T0, title: 'live', status: 'active', project: 'C' }).store
+    s = addAction(s, { id: 'A2', created_at: T0, title: 'done', status: 'active', project: 'C' }).store
+    s = setStatus(s, 'A2', { status: 'completed', closed_at: T0 }).store
+    const out = renderDashboard(s, TODAY)
+    const rootBlock = out.split('- id: R')[1]?.split('- id: C')[0] ?? ''
+    assert.match(rootBlock, /actions: 0 \(\+1 in sub-projects\)/)
+  })
 })

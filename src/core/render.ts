@@ -185,12 +185,21 @@ function projectFields(p: ProjectList, s: Store, ctx: Ctx): [string, string][] {
   }
   if (ctx === 'list') f.push(['status', p.status])
   const counts = projectCounts(s, p.id)
-  f.push(['actions', String(counts.actions)])
-  f.push(['waiting', String(counts.waiting)])
-  f.push(['deadlines', String(counts.deadlines)])
+  // Roll up direct children's counts so a parent's `waiting: 0` isn't
+  // misleading when a sub-project has waiting items. Only roots have
+  // children (depth strictly 1), so child blocks never show this.
+  const sub = p.parent === null ? rollupChildCounts(s, p.id) : { actions: 0, waiting: 0, deadlines: 0 }
+  f.push(['actions', countWithSub(counts.actions, sub.actions)])
+  f.push(['waiting', countWithSub(counts.waiting, sub.waiting)])
+  f.push(['deadlines', countWithSub(counts.deadlines, sub.deadlines)])
   if (ctx === 'list' && p.closed_at !== null) f.push(['closed', p.closed_at])
   if (p.note !== null) f.push(['note', compactNoteValue(p.note)])
   return f
+}
+
+function countWithSub(own: number, sub: number): string {
+  if (sub === 0) return String(own)
+  return `${own} (+${sub} in sub-projects)`
 }
 
 function projectCounts(s: Store, projectId: string): { actions: number; waiting: number; deadlines: number } {
@@ -203,6 +212,20 @@ function projectCounts(s: Store, projectId: string): { actions: number; waiting:
     if (i.type === 'action') actions++
     else if (i.type === 'waiting') waiting++
     else if (i.type === 'deadline') deadlines++
+  }
+  return { actions, waiting, deadlines }
+}
+
+function rollupChildCounts(s: Store, parentId: string): { actions: number; waiting: number; deadlines: number } {
+  let actions = 0
+  let waiting = 0
+  let deadlines = 0
+  for (const child of s.lists) {
+    if (child.type !== 'project' || child.parent !== parentId) continue
+    const c = projectCounts(s, child.id)
+    actions += c.actions
+    waiting += c.waiting
+    deadlines += c.deadlines
   }
   return { actions, waiting, deadlines }
 }
