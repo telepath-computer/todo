@@ -24,6 +24,7 @@ type Project = {
   status: Status
   closed_at: string | null
   created_at: string
+  parent: string | null
 }
 
 type Action = {
@@ -103,9 +104,10 @@ function cli(...args: string[]) {
   return runCli(args, { dataDir })
 }
 
-function addProject(title: string, opts: { note?: string } = {}): Project {
+function addProject(title: string, opts: { note?: string; parent?: string } = {}): Project {
   const args = ['add', 'project', '--title', title]
   if (opts.note !== undefined) args.push('--note', opts.note)
+  if (opts.parent !== undefined) args.push('--parent', opts.parent)
   const r = cli(...args)
   assert.equal(r.code, 0, r.stderr)
   return parseJson<Project>(r.stdout)
@@ -1210,5 +1212,121 @@ describe('todo list with deadlines', () => {
     cli('defer', proj.id)
     const r = cli()
     assert.ok(!r.stdout.includes(`id: ${d.id}`))
+  })
+})
+
+// ---- Sub-projects ---------------------------------------------------
+
+describe('todo sub-projects', () => {
+  it('add project --parent attaches to a root project', () => {
+    const root = addProject('Root')
+    const child = addProject('Child', { parent: root.id })
+    assert.equal(child.parent, root.id)
+    assert.equal(root.parent, null)
+  })
+
+  it('add project --parent rejects an unknown parent id', () => {
+    const r = cli('add', 'project', '--title', 'Child', '--parent', 'nope1234')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /not found|unknown project/i)
+  })
+
+  it('add project --parent rejects a child project (depth-1 limit)', () => {
+    const root = addProject('Root')
+    const child = addProject('Child', { parent: root.id })
+    const r = cli('add', 'project', '--title', 'Grandchild', '--parent', child.id)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /must be a root/i)
+  })
+
+  it('add project --parent rejects a non-project id', () => {
+    const a = addAction('A', { active: true })
+    const r = cli('add', 'project', '--title', 'P', '--parent', a.id)
+    assert.equal(r.code, 1)
+  })
+
+  it('edit project --parent re-parents and --parent "" detaches', () => {
+    const r1 = addProject('R1')
+    const r2 = addProject('R2')
+    const c = addProject('C')
+    const reparented = parseJson<Project>(cli('edit', c.id, '--parent', r1.id).stdout)
+    assert.equal(reparented.parent, r1.id)
+    const moved = parseJson<Project>(cli('edit', c.id, '--parent', r2.id).stdout)
+    assert.equal(moved.parent, r2.id)
+    const detached = parseJson<Project>(cli('edit', c.id, '--parent', '').stdout)
+    assert.equal(detached.parent, null)
+  })
+
+  it('edit project --parent rejects making a project with children into a child', () => {
+    const r1 = addProject('R1')
+    const r2 = addProject('R2')
+    addProject('Child', { parent: r1.id })
+    const r = cli('edit', r1.id, '--parent', r2.id)
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /has children/i)
+  })
+
+  it('edit --parent is rejected on actions, waiting items, deadlines', () => {
+    const root = addProject('Root')
+    const a = addAction('A', { active: true })
+    const w = addWaitingItem('W')
+    const d = addDeadlineItem('D', { date: FUTURE })
+    for (const id of [a.id, w.id, d.id]) {
+      const r = cli('edit', id, '--parent', root.id)
+      assert.equal(r.code, 1, `${id}: ${r.stderr}`)
+      assert.match(r.stderr, /--parent.*not allowed/i, `${id}: ${r.stderr}`)
+    }
+  })
+
+  it('dashboard project block shows parent: <title> [<id>] for child projects', () => {
+    const root = addProject('NY trip')
+    const child = addProject('Sarah meeting', { parent: root.id })
+    const r = cli()
+    assert.equal(r.code, 0, r.stderr)
+    assert.ok(r.stdout.includes(`- id: ${child.id}`))
+    assert.ok(r.stdout.includes(`  parent: NY trip [${root.id}]`))
+  })
+
+  it('deferring a parent hides both the child project and its items from the dashboard', () => {
+    const root = addProject('Root')
+    const child = addProject('Child', { parent: root.id })
+    const a = addAction('childAction', { active: true, project: child.id })
+    let r = cli()
+    assert.ok(r.stdout.includes(`id: ${a.id}`))
+    assert.ok(r.stdout.includes(`id: ${child.id}`))
+    cli('defer', root.id)
+    r = cli()
+    assert.ok(!r.stdout.includes(`id: ${a.id}`), 'child action should be hidden')
+    assert.ok(!r.stdout.includes(`id: ${child.id}`), 'child project should be hidden')
+  })
+
+  it('show <root> includes a SUB-PROJECTS section with child counts', () => {
+    const root = addProject('NY trip')
+    const child = addProject('Sarah meeting', { parent: root.id })
+    addAction('book venue', { active: true, project: child.id })
+    addAction('email Sarah', { active: true, project: child.id })
+    const r = cli('show', root.id)
+    assert.equal(r.code, 0, r.stderr)
+    assert.ok(r.stdout.includes('SUB-PROJECTS [1]:'), r.stdout)
+    assert.ok(r.stdout.includes(`- id: ${child.id}`))
+    assert.ok(r.stdout.includes('  title: "Sarah meeting"'))
+    assert.ok(r.stdout.includes('  actions: 2'))
+  })
+
+  it('show <child> renders the parent reference in the entity block', () => {
+    const root = addProject('NY trip')
+    const child = addProject('Sarah meeting', { parent: root.id })
+    const r = cli('show', child.id)
+    assert.equal(r.code, 0, r.stderr)
+    assert.match(r.stdout, /^parent: NY trip \[[^\]]+\]$/m)
+  })
+
+  it('list projects renders all projects flat with parent on children', () => {
+    const root = addProject('Root')
+    addProject('Child', { parent: root.id })
+    const r = cli('list', 'projects')
+    assert.equal(r.code, 0, r.stderr)
+    assert.match(r.stdout, /^PROJECTS \[2\]:$/m)
+    assert.ok(r.stdout.includes(`  parent: Root [${root.id}]`))
   })
 })

@@ -474,3 +474,67 @@ describe('renderShow note rendering', () => {
     assert.ok(out.includes('first paragraph'))
   })
 })
+
+// ---- Sub-projects ---------------------------------------------------
+
+describe('sub-projects rendering', () => {
+  function rootWithChild(): Store {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'R', created_at: T0, title: 'Root' }).store
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    return s
+  }
+
+  it('dashboard project block omits parent for root projects', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P', created_at: T0, title: 'Solo' }).store
+    const out = renderDashboard(s, TODAY)
+    assert.match(out, /^- id: P$/m)
+    assert.doesNotMatch(out, /^\s+parent:/m)
+  })
+
+  it('dashboard project block shows parent: <title> [<id>] for child projects', () => {
+    const s = rootWithChild()
+    const out = renderDashboard(s, TODAY)
+    assert.ok(out.includes('- id: C'))
+    assert.ok(out.includes('  parent: Root [R]'))
+    // Root itself does NOT get a parent field.
+    const rootBlock = out.split('- id: R')[1]?.split('- id: C')[0] ?? ''
+    assert.doesNotMatch(rootBlock, /\bparent:/)
+  })
+
+  it('renderShow on a root with children includes a SUB-PROJECTS section', () => {
+    const s = rootWithChild()
+    const out = renderShow(s, TODAY, s.lists[0])
+    assert.ok(out.includes('SUB-PROJECTS [1]:'), out)
+    assert.ok(out.includes('- id: C'))
+    assert.ok(out.includes('  title: "Child"'))
+    // Children inside a sub-projects section don't repeat the parent field.
+    assert.doesNotMatch(out, /SUB-PROJECTS[\s\S]*\bparent: Root/)
+  })
+
+  it('renderShow on a root without children omits SUB-PROJECTS', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P', created_at: T0, title: 'Solo' }).store
+    const out = renderShow(s, TODAY, s.lists[0])
+    assert.ok(!out.includes('SUB-PROJECTS'))
+  })
+
+  it('renderShow on a child includes parent in the entity field block', () => {
+    const s = rootWithChild()
+    const child = s.lists.find((l) => l.id === 'C')!
+    const out = renderShow(s, TODAY, child)
+    assert.ok(out.startsWith('PROJECT: "Child" [C]'), out)
+    assert.match(out, /^parent: Root \[R\]$/m)
+  })
+
+  it('list projects renders parent on children, omits on roots', () => {
+    const s = rootWithChild()
+    const out = renderList(s, TODAY, 'projects')
+    assert.match(out, /^PROJECTS \[2\]:$/m)
+    const childBlock = out.split('- id: C')[1] ?? ''
+    assert.match(childBlock, /\bparent: Root \[R\]/)
+    const rootBlock = out.split('- id: R')[1]?.split('- id: C')[0] ?? ''
+    assert.doesNotMatch(rootBlock, /\bparent:/)
+  })
+})

@@ -17,6 +17,7 @@ export type ProjectList = BaseList & {
   type: 'project'
   status: Status
   closed_at: string | null     // ISO ts; non-null iff status is completed/dropped
+  parent: string | null        // project id; non-null = sub-project. Depth strictly 1.
 }
 
 export type List = ProjectList
@@ -107,6 +108,20 @@ function requireListExists(s: Store, listId: string | null | undefined): void {
   if (!findList(s, listId)) throw new InvalidArgument(`unknown project: ${listId}`)
 }
 
+// Sub-project parent validation: target must exist as a project AND must
+// itself be a root (parent === null). Depth limit is strictly 1.
+function requireRootProjectParent(s: Store, parentId: string): void {
+  const parent = findList(s, parentId)
+  if (!parent) throw new InvalidArgument(`unknown project: ${parentId}`)
+  if (parent.parent !== null) {
+    throw new InvalidArgument(`--parent must be a root project: ${parentId}`)
+  }
+}
+
+export function findChildren(s: Store, projectId: string): ProjectList[] {
+  return s.lists.filter((l) => l.type === 'project' && l.parent === projectId)
+}
+
 function replaceList(s: Store, next: List): Store {
   return { ...s, lists: s.lists.map((l) => (l.id === next.id ? next : l)) }
 }
@@ -122,9 +137,12 @@ export type AddProjectInput = {
   created_at: string
   title: string
   note?: string | null
+  parent?: string | null
 }
 
 export function addProject(s: Store, input: AddProjectInput): { store: Store; entity: ProjectList } {
+  const parent = input.parent ?? null
+  if (parent !== null) requireRootProjectParent(s, parent)
   const entity: ProjectList = {
     id: input.id,
     type: 'project',
@@ -133,6 +151,7 @@ export function addProject(s: Store, input: AddProjectInput): { store: Store; en
     created_at: input.created_at,
     status: 'active',
     closed_at: null,
+    parent,
   }
   return { store: { ...s, lists: [...s.lists, entity] }, entity }
 }
@@ -250,17 +269,30 @@ export function appendNote(
 export type EditListPatch = {
   title?: string
   note?: string | null
+  parent?: string | null
 }
 
 export function editList(s: Store, id: string, patch: EditListPatch): { store: Store; entity: ProjectList } {
   const list = findList(s, id)
   if (!list) throw new NotFound(`not found: ${id}`)
-  if (patch.title === undefined && patch.note === undefined) {
+  if (patch.title === undefined && patch.note === undefined && patch.parent === undefined) {
     throw new NothingToEdit('nothing to edit')
+  }
+  if (patch.parent !== undefined && patch.parent !== null) {
+    if (patch.parent === id) {
+      throw new InvalidArgument(`a project cannot be its own parent: ${id}`)
+    }
+    if (findChildren(s, id).length > 0) {
+      throw new InvalidArgument(
+        `cannot make this project a sub-project (it has children): ${id}`,
+      )
+    }
+    requireRootProjectParent(s, patch.parent)
   }
   const next: ProjectList = { ...list }
   if (patch.title !== undefined) next.title = requireValidTitle(patch.title)
   if (patch.note !== undefined) next.note = patch.note
+  if (patch.parent !== undefined) next.parent = patch.parent
   return { store: replaceList(s, next), entity: next }
 }
 
@@ -387,11 +419,21 @@ export function setStatus(
 // (status='deferred', start_at <= today) are promoted into liveActions
 // automatically; deferredActions excludes them to avoid double-counting.
 
+// True iff the project itself is active AND its parent (if any) is also
+// active. Depth is strictly 1, so the cascade is a single extra hop.
+function projectChainActive(s: Store, p: ProjectList): boolean {
+  if (p.status !== 'active') return false
+  if (p.parent === null) return true
+  const grand = findList(s, p.parent)
+  if (!grand) return true   // dangling parent ref: treat as root
+  return grand.status === 'active'
+}
+
 function parentActive(s: Store, projectId: string | null): boolean {
   if (projectId === null) return true
   const parent = findList(s, projectId)
   if (!parent) return true
-  return parent.status === 'active'
+  return projectChainActive(s, parent)
 }
 
 function isAction(i: Item): i is ActionItem {
@@ -425,7 +467,7 @@ export function liveWaiting(s: Store): WaitingItem[] {
 }
 
 export function activeProjects(s: Store): ProjectList[] {
-  return s.lists.filter((l) => l.type === 'project' && l.status === 'active')
+  return s.lists.filter((l) => l.type === 'project' && projectChainActive(s, l))
 }
 
 export function deferredProjects(s: Store): ProjectList[] {

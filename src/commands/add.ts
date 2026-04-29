@@ -5,7 +5,10 @@ import { addAction, addDeadline, addProject, addWaiting } from '../core/model.js
 import { newId, nowIso, readStore, writeStore } from '../core/store.js'
 import { json } from './shared.js'
 
-export function addProjectCmd(opts: { title: string; note?: string }): string {
+export function addProjectCmd(opts: { title: string; note?: string; parent?: string }): string {
+  if (opts.parent === '') {
+    throw new InvalidArgument('--parent cannot be empty on add')
+  }
   const { dataDir } = resolveDataDir()
   const store = readStore(dataDir)
   const { store: next, entity } = addProject(store, {
@@ -13,6 +16,7 @@ export function addProjectCmd(opts: { title: string; note?: string }): string {
     created_at: nowIso(),
     title: opts.title,
     note: opts.note ?? null,
+    parent: opts.parent ?? null,
   })
   writeStore(dataDir, next)
   return json(entity)

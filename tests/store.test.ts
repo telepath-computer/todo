@@ -176,6 +176,36 @@ describe('readStore / writeStore', () => {
     }
   })
 
+  it('normalizes a pre-sub-projects project (no parent) to parent: null on read', () => {
+    const dir = makeTempDataDir()
+    try {
+      mkdirSync(dir, { recursive: true })
+      const raw = JSON.stringify({
+        lists: [
+          {
+            id: 'P1',
+            type: 'project',
+            title: 'P',
+            note: null,
+            created_at: nowIso(),
+            status: 'active',
+            closed_at: null,
+          },
+        ],
+        items: [],
+      })
+      writeFileSync(join(dir, 'store.json'), raw)
+      const back = readStore(dir)
+      assert.equal(back.lists.length, 1)
+      const project = back.lists[0]
+      assert.equal(project.type, 'project')
+      assert.equal('parent' in project, true)
+      assert.equal(project.parent, null)
+    } finally {
+      cleanup(dir)
+    }
+  })
+
   it('throws DoError with a clean message on malformed JSON', () => {
     const dir = makeTempDataDir()
     try {

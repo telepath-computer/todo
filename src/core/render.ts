@@ -3,6 +3,7 @@ import {
   activeProjects,
   deferredActions,
   deferredProjects,
+  findChildren,
   findList,
   liveActions,
   liveWaiting,
@@ -178,6 +179,10 @@ function projectFields(p: ProjectList, s: Store, ctx: Ctx): [string, string][] {
   const f: [string, string][] = []
   f.push(['id', p.id])
   f.push(['title', quote(p.title)])
+  if (p.parent !== null && ctx !== 'show-children') {
+    const ref = projectRef(s, p.parent)
+    if (ref) f.push(['parent', ref])
+  }
   if (ctx === 'list') f.push(['status', p.status])
   const counts = projectCounts(s, p.id)
   f.push(['actions', String(counts.actions)])
@@ -310,6 +315,10 @@ export function renderShow(s: Store, today: string, entity: List | Item): string
 function renderShowProject(s: Store, today: string, p: ProjectList): string {
   const fields: [string, string][] = []
   fields.push(['status', p.status])
+  if (p.parent !== null) {
+    const ref = projectRef(s, p.parent)
+    if (ref) fields.push(['parent', ref])
+  }
   if (p.closed_at !== null) fields.push(['closed', p.closed_at])
   fields.push(['created', p.created_at])
   if (p.note !== null) fields.push(showNoteField(p.note))
@@ -350,6 +359,15 @@ function renderShowProject(s: Store, today: string, p: ProjectList): string {
       'DEADLINES',
       dl.length,
       dl.map((d) => itemBlock(deadlineFields(d, s, today, 'show-children'))),
+    ),
+  )
+
+  const subs = findChildren(s, p.id)
+  sections.push(
+    section(
+      'SUB-PROJECTS',
+      subs.length,
+      subs.map((sp) => itemBlock(projectFields(sp, s, 'show-children'))),
     ),
   )
 

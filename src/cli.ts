@@ -67,7 +67,8 @@ add
   .description('Create a project')
   .requiredOption('--title <text>', 'title')
   .option('--note <text>', 'attach a note')
-  .action((opts: { title: string; note?: string }) => {
+  .option('--parent <id>', 'attach to a root project as a sub-project (depth strictly 1)')
+  .action((opts: { title: string; note?: string; parent?: string }) => {
     run(() => addProjectCmd(opts))
   })
 
@@ -129,6 +130,7 @@ program
   .option('--note-append <text>', 'append text to the existing note (joins with a blank line)')
   .option('--due <date>', "due date; '' clears (action only)")
   .option('--project <id>', "parent project id; '' detaches (item only)")
+  .option('--parent <id>', "parent project; '' detaches to root (project only; depth strictly 1)")
   .option('--date <date>', 'deadline date (deadline only; must be future)')
   .action(
     (
@@ -144,6 +146,7 @@ program
         noteAppend?: string
         due?: string
         project?: string
+        parent?: string
         date?: string
       },
     ) => {

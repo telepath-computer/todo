@@ -28,6 +28,7 @@ export type EditCmdOpts = {
   noteAppend?: string
   due?: string
   project?: string
+  parent?: string
   date?: string
 }
 
@@ -51,6 +52,7 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
   } else if (entity.type === 'waiting') {
     if (opts.start !== undefined) throw new InvalidArgument('--start is not allowed on waiting items')
     if (opts.date !== undefined) throw new InvalidArgument('--date is not allowed on waiting items')
+    if (opts.parent !== undefined) throw new InvalidArgument('--parent is not allowed on waiting items')
     if (wantStatus === 'active' || wantStatus === 'deferred') {
       throw new InvalidArgument(
         `cannot ${wantStatus === 'deferred' ? 'defer' : 'activate'} waiting item ${id} ` +
@@ -61,6 +63,7 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
   } else if (entity.type === 'deadline') {
     if (opts.start !== undefined) throw new InvalidArgument('--start is not allowed on deadlines')
     if (opts.due !== undefined) throw new InvalidArgument('--due is not allowed on deadlines')
+    if (opts.parent !== undefined) throw new InvalidArgument('--parent is not allowed on deadlines')
     if (wantStatus === 'completed') {
       throw new InvalidArgument(
         `cannot complete deadline ${id} (deadlines are not tasks; use drop)`,
@@ -73,6 +76,7 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
     }
   } else if (entity.type === 'action') {
     if (opts.date !== undefined) throw new InvalidArgument('--date is not allowed on actions')
+    if (opts.parent !== undefined) throw new InvalidArgument('--parent is not allowed on actions')
   }
 
   if (opts.start !== undefined) {
@@ -118,6 +122,7 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
     opts.note !== undefined ||
     opts.due !== undefined ||
     opts.project !== undefined ||
+    opts.parent !== undefined ||
     dateVal !== undefined
   const startClearOnly = transition === null && startVal === null && entity.type === 'action'
 
@@ -126,6 +131,7 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
       const patch: EditListPatch = {}
       if (opts.title !== undefined) patch.title = opts.title
       if (opts.note !== undefined) patch.note = opts.note === '' ? null : opts.note
+      if (opts.parent !== undefined) patch.parent = opts.parent === '' ? null : opts.parent
       const result = editList(nextStore, id, patch)
       nextStore = result.store
       nextEntity = result.entity

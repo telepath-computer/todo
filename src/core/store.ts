@@ -2,7 +2,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'node:path'
 import { customAlphabet } from 'nanoid'
 import { DoError } from './errors.js'
-import type { ActionItem, Item, Store } from './model.js'
+import type { ActionItem, Item, ProjectList, Store } from './model.js'
 import { EMPTY_STORE } from './model.js'
 
 const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -44,7 +44,14 @@ function normalizeStore(s: Store): Store {
     }
     return i
   })
-  return { ...s, items }
+  const lists = s.lists.map((l) => {
+    if (l.type === 'project') {
+      const raw = l as ProjectList & { parent?: string | null }
+      if (raw.parent === undefined) return { ...raw, parent: null }
+    }
+    return l
+  })
+  return { ...s, items, lists }
 }
 
 export function writeStore(dataDir: string, store: Store): void {

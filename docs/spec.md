@@ -79,6 +79,7 @@ type ProjectList = BaseList & {
   type: 'project'
   status: Status
   closed_at: string | null     // ISO; non-null iff status is completed/dropped
+  parent: string | null        // project id of root parent; null = root project. Depth strictly 1.
 }
 
 type List = ProjectList         // future: more list subtypes
@@ -133,6 +134,13 @@ type Store = { lists: List[]; items: Item[] }
   that change status to anything else clear `start_at`.
 - `start_at` must be a strictly-future date (`> today` in host local TZ) at the
   moment it's written.
+- `ProjectList.parent` is either `null` (root project) or the id of an
+  existing root project. Depth strictly 1: a project with `parent !== null`
+  cannot be the parent of another. A project with children cannot itself
+  become a child. Setting a project as its own parent is rejected.
+- A child project (and its items) is suppressed from dashboard / live
+  buckets when its parent's status is anything other than `active`. This
+  cascade is one hop; grandchildren do not exist.
 
 ### IDs
 
@@ -218,7 +226,7 @@ counts), then `ACTIVE ACTIONS [N]:`, `DEFERRED ACTIONS [N]:`,
 Verb-first: `todo add <type> --title "..." [type-specific flags]`.
 
 ```
-todo add project  --title "<text>" [--note <text>]
+todo add project  --title "<text>" [--note <text>] [--parent <root-project-id>]
 todo add action   --title "<text>" (--active | --deferred | --start <date>)
                                    [--project <id>] [--due <date>] [--note <text>]
 todo add waiting  --title "<text>" [--project <id>] [--note <text>]
@@ -247,7 +255,7 @@ todo add deadline --title "<text>" --date <date> [--project <id>] [--note <text>
 todo edit <id> [--active | --deferred | --completed | --dropped]
               [--start <date>]
               [--title ...] [--note ...] [--note-append ...]
-              [--due ...] [--project ...] [--date ...]
+              [--due ...] [--project ...] [--parent ...] [--date ...]
 ```
 
 Field semantics:
@@ -260,6 +268,11 @@ Field semantics:
   with a blank line (`\n\n`); if `note` was null, sets it to `<text>`.
   Empty `--note-append ""` is rejected. `--note` and `--note-append`
   cannot be used in the same call.
+- `--parent <root-project-id>` (project only) attaches a project to a root
+  project as a sub-project. Depth is strictly 1: target must be a root
+  (`parent === null`); the project being edited must have no children.
+  `--parent ""` detaches (sets to `null`). Rejected on actions, waiting
+  items, and deadlines.
 - `--due` is rejected on projects, waiting items, and deadlines.
 - `--date` is only valid on deadlines; rejected on projects, actions, and
   waiting items. New value must be a future date.
@@ -379,6 +392,11 @@ Plain text on stderr, prefixed with `todo:`, exit code 1.
 | `--start cannot be empty on add` / `... on defer` | `--start ""` on `add action` or `defer` |
 | `--note and --note-append are mutually exclusive` | both flags passed to one `edit` |
 | `body is required and cannot be empty` | `--note-append ""` |
+| `--parent must be a root project: <id>` | parent target itself has a parent |
+| `cannot make this project a sub-project (it has children): <id>` | edit project with children gets `--parent <root>` |
+| `--parent is not allowed on actions / waiting items / deadlines` | `--parent` on a non-project entity |
+| `--parent cannot be empty on add` | `add project --parent ""` |
+| `a project cannot be its own parent: <id>` | `edit project <id> --parent <id>` |
 
 ## Out of scope
 

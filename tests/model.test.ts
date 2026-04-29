@@ -14,6 +14,7 @@ import {
   deferredProjects,
   editItem,
   editList,
+  findChildren,
   findEntity,
   findItem,
   findList,
@@ -701,5 +702,134 @@ describe('appendNote', () => {
     appendNote(s, 'P1', 'b')
     assert.equal(s.lists, beforeLists)
     assert.equal((findList(s, 'P1') as ProjectList).note, 'a')
+  })
+})
+
+// Sub-projects -------------------------------------------------------
+
+describe('sub-projects', () => {
+  function withRoot(): Store {
+    return addProject(EMPTY_STORE, { id: 'R', created_at: T0, title: 'Root' }).store
+  }
+
+  it('addProject defaults parent to null', () => {
+    const { entity } = addProject(EMPTY_STORE, { id: 'P', created_at: T0, title: 'P' })
+    assert.equal(entity.parent, null)
+  })
+
+  it('addProject with valid root parent stores the parent id', () => {
+    const s = withRoot()
+    const { entity } = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' })
+    assert.equal(entity.parent, 'R')
+  })
+
+  it('addProject rejects unknown parent', () => {
+    assert.throws(
+      () => addProject(EMPTY_STORE, { id: 'C', created_at: T0, title: 'Child', parent: 'NOPE' }),
+      InvalidArgument,
+    )
+  })
+
+  it('addProject rejects parent that itself has a parent (depth-1 limit)', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    assert.throws(
+      () => addProject(s, { id: 'GC', created_at: T0, title: 'Grandchild', parent: 'C' }),
+      (err: Error) =>
+        err instanceof InvalidArgument && /must be a root project/i.test(err.message),
+    )
+  })
+
+  it('addProject rejects parent that resolves to a non-project entity', () => {
+    let s: Store = EMPTY_STORE
+    s = addAction(s, { id: 'A', created_at: T0, title: 'a', status: 'active' }).store
+    assert.throws(
+      () => addProject(s, { id: 'P', created_at: T0, title: 'P', parent: 'A' }),
+      InvalidArgument,
+    )
+  })
+
+  it('editList sets a parent on a previously root project', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child' }).store
+    const { entity } = editList(s, 'C', { parent: 'R' })
+    assert.equal(entity.parent, 'R')
+  })
+
+  it('editList clears parent with null', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    const { entity } = editList(s, 'C', { parent: null })
+    assert.equal(entity.parent, null)
+  })
+
+  it('editList rejects making a project with children into a child', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'P2', created_at: T0, title: 'OtherRoot' }).store
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    // R has a child; cannot now reparent R under P2.
+    assert.throws(
+      () => editList(s, 'R', { parent: 'P2' }),
+      (err: Error) =>
+        err instanceof InvalidArgument && /has children/i.test(err.message),
+    )
+  })
+
+  it('editList rejects parent that itself has a parent', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    s = addProject(s, { id: 'P3', created_at: T0, title: 'Standalone' }).store
+    assert.throws(
+      () => editList(s, 'P3', { parent: 'C' }),
+      (err: Error) =>
+        err instanceof InvalidArgument && /must be a root/i.test(err.message),
+    )
+  })
+
+  it('findChildren returns direct children only', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'C1', created_at: T0, title: 'C1', parent: 'R' }).store
+    s = addProject(s, { id: 'C2', created_at: T0, title: 'C2', parent: 'R' }).store
+    s = addProject(s, { id: 'P3', created_at: T0, title: 'Standalone' }).store
+    const ids = findChildren(s, 'R').map((p) => p.id).sort()
+    assert.deepEqual(ids, ['C1', 'C2'])
+    assert.deepEqual(findChildren(s, 'P3'), [])
+  })
+
+  it('activeProjects excludes a child whose parent is deferred', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    assert.deepEqual(activeProjects(s).map((p) => p.id).sort(), ['C', 'R'])
+    s = setStatus(s, 'R', { status: 'deferred', start_at: null }).store
+    assert.deepEqual(activeProjects(s).map((p) => p.id), [])
+  })
+
+  it('cascades through one hop: items under a child of a deferred parent are not live', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    s = addAction(s, { id: 'A', created_at: T0, title: 'A', status: 'active', project: 'C' }).store
+    s = addWaiting(s, { id: 'W', created_at: T0, title: 'W', project: 'C' }).store
+    assert.deepEqual(liveActions(s, TODAY).map((a) => a.id), ['A'])
+    assert.deepEqual(liveWaiting(s).map((w) => w.id), ['W'])
+
+    s = setStatus(s, 'R', { status: 'deferred', start_at: null }).store
+    assert.deepEqual(liveActions(s, TODAY), [])
+    assert.deepEqual(liveWaiting(s), [])
+  })
+
+  it('cascade also applies to deadlines', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    s = addDeadline(s, { id: 'D', created_at: T0, title: 'D', date: FUTURE, project: 'C' }).store
+    assert.deepEqual(activeDeadlines(s, TODAY).map((d) => d.id), ['D'])
+    s = setStatus(s, 'R', { status: 'deferred', start_at: null }).store
+    assert.deepEqual(activeDeadlines(s, TODAY), [])
+  })
+
+  it('a dropped parent suppresses the child too', () => {
+    let s = withRoot()
+    s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
+    s = setStatus(s, 'R', { status: 'dropped', closed_at: T0 }).store
+    assert.deepEqual(activeProjects(s).map((p) => p.id), [])
   })
 })
