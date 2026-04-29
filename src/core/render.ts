@@ -1,20 +1,24 @@
 import {
   activeDeadlines,
   activeProjects,
+  allMemos,
   deferredActions,
   deferredProjects,
   findChildren,
   findList,
   liveActions,
   liveWaiting,
+  pinnedMemos,
   projectActiveActions,
   projectDeadlines,
   projectDeferredActions,
   projectWaiting,
+  reviewDeadlines,
   type ActionItem,
   type DeadlineItem,
   type Item,
   type List,
+  type MemoItem,
   type ProjectList,
   type Store,
   type WaitingItem,
@@ -102,6 +106,12 @@ function showNoteField(note: string): [string, string] {
   return ['note', `|\n${indented}`]
 }
 
+function memoNoteValue(note: string): string {
+  if (!note.includes('\n')) return quote(note)
+  const indented = note.split('\n').map((l) => `    ${l}`).join('\n')
+  return `|\n${indented}`
+}
+
 // String quoting -------------------------------------------------------
 // Free-form text values (title, note) are wrapped in double quotes so that
 // embedded colons or whitespace can't be confused with the YAML-ish
@@ -125,9 +135,10 @@ function projectRef(s: Store, projectId: string | null): string | null {
 //
 // - 'dashboard'      → status implicit (hidden), project shown
 // - 'list'           → status shown, project shown, closed_at shown if terminal
+// - 'review'         → status implicit, project shown
 // - 'show-children'  → status implicit, project implicit (hidden)
 
-type Ctx = 'dashboard' | 'list' | 'show-children'
+type Ctx = 'dashboard' | 'list' | 'review' | 'show-children'
 
 function actionFields(a: ActionItem, s: Store, today: string, ctx: Ctx): [string, string][] {
   const f: [string, string][] = []
@@ -197,6 +208,16 @@ function projectFields(p: ProjectList, s: Store, ctx: Ctx): [string, string][] {
   return f
 }
 
+function memoFields(m: MemoItem, s: Store, ctx: Exclude<Ctx, 'show-children'>): [string, string][] {
+  const f: [string, string][] = []
+  f.push(['id', m.id])
+  f.push(['note', memoNoteValue(m.note)])
+  const ref = projectRef(s, m.project)
+  if (ref) f.push(['project', ref])
+  if (ctx !== 'dashboard') f.push(['pinned', m.pinned ? 'true' : 'false'])
+  return f
+}
+
 function countWithSub(own: number, sub: number): string {
   if (sub === 0) return String(own)
   return `${own} (+${sub} in sub-projects)`
@@ -208,6 +229,7 @@ function projectCounts(s: Store, projectId: string): { actions: number; waiting:
   let deadlines = 0
   for (const i of s.items) {
     if (i.project !== projectId) continue
+    if (i.type === 'memo') continue
     if (isTerminal(i.status)) continue
     if (i.type === 'action') actions++
     else if (i.type === 'waiting') waiting++
@@ -237,6 +259,7 @@ function isTerminal(s: string): boolean {
 function dispatchFields(item: Item, s: Store, today: string, ctx: Ctx): [string, string][] {
   if (item.type === 'action') return actionFields(item, s, today, ctx)
   if (item.type === 'waiting') return waitingFields(item, s, today, ctx)
+  if (item.type === 'memo') return memoFields(item, s, ctx === 'show-children' ? 'review' : ctx)
   return deadlineFields(item, s, today, ctx)
 }
 
@@ -253,6 +276,13 @@ function entityBlock(fields: [string, string][]): string {
   return fields.map(([k, v]) => `${k}: ${v}`).join('\n')
 }
 
+function orderMemos(memos: MemoItem[]): MemoItem[] {
+  return [...memos].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+    return b.created_at.localeCompare(a.created_at)
+  })
+}
+
 function section(heading: string, count: number, blocks: string[]): string {
   if (count === 0) return ''
   return `${heading} [${count}]:\n\n${blocks.join('\n\n')}`
@@ -260,23 +290,17 @@ function section(heading: string, count: number, blocks: string[]): string {
 
 // Top-level renderers ------------------------------------------------
 
-const EMPTY_CONTEXT_PLACEHOLDER =
-  "(empty — agent: store the user's current goals, priorities, focus, or pointers to relevant docs here. Not actions, deadlines, or projects; those have their own commands.)"
-
-// Always-emitted YAML `|`-block scalar for the store's `meta.context`.
-// Used both as the dashboard preamble and as the response to bare
-// `todo context`. Always block-scalar (even single-line, even null) so
-// the parser shape stays predictable regardless of body content.
-export function renderContextBlock(s: Store): string {
-  const body = s.meta.context ?? EMPTY_CONTEXT_PLACEHOLDER
-  const indented = body.split('\n').map((l) => `  ${l}`).join('\n')
-  return `CONTEXT: |\n${indented}`
-}
-
 export function renderDashboard(s: Store, today: string, hints?: string): string {
   const sections: string[] = []
 
-  sections.push(renderContextBlock(s))
+  const memos = orderMemos(pinnedMemos(s))
+  sections.push(
+    section(
+      'KEEP IN MIND',
+      memos.length,
+      memos.map((memo) => itemBlock(memoFields(memo, s, 'dashboard'))),
+    ),
+  )
 
   const aa = liveActions(s, today)
   sections.push(
@@ -319,13 +343,85 @@ export function renderDashboard(s: Store, today: string, hints?: string): string
   return sections.filter((x) => x.length > 0).join('\n\n')
 }
 
-export type ListType = 'actions' | 'projects' | 'deadlines' | 'waiting'
+export function renderReview(s: Store, today: string, hints?: string): string {
+  const sections: string[] = []
+
+  const memos = orderMemos(allMemos(s))
+  sections.push(
+    section(
+      'MEMOS',
+      memos.length,
+      memos.map((memo) => itemBlock(memoFields(memo, s, 'review'))),
+    ),
+  )
+
+  const aa = liveActions(s, today)
+  sections.push(
+    section(
+      'ACTIVE ACTIONS',
+      aa.length,
+      aa.map((a) => itemBlock(actionFields(a, s, today, 'review'))),
+    ),
+  )
+
+  const da = deferredActions(s, today)
+  sections.push(
+    section(
+      'DEFERRED ACTIONS',
+      da.length,
+      da.map((a) => itemBlock(actionFields(a, s, today, 'review'))),
+    ),
+  )
+
+  const w = liveWaiting(s)
+  sections.push(
+    section(
+      'WAITING',
+      w.length,
+      w.map((wi) => itemBlock(waitingFields(wi, s, today, 'review'))),
+    ),
+  )
+
+  const dl = reviewDeadlines(s)
+  sections.push(
+    section(
+      'DEADLINES',
+      dl.length,
+      dl.map((d) => itemBlock(deadlineFields(d, s, today, 'review'))),
+    ),
+  )
+
+  const ap = activeProjects(s)
+  sections.push(
+    section(
+      'ACTIVE PROJECTS',
+      ap.length,
+      ap.map((p) => itemBlock(projectFields(p, s, 'review'))),
+    ),
+  )
+
+  const dp = deferredProjects(s)
+  sections.push(
+    section(
+      'DEFERRED PROJECTS',
+      dp.length,
+      dp.map((p) => itemBlock(projectFields(p, s, 'review'))),
+    ),
+  )
+
+  if (hints && hints.length > 0) sections.push(`HINTS:\n\n${hints.trimEnd()}`)
+
+  return sections.filter((x) => x.length > 0).join('\n\n')
+}
+
+export type ListType = 'actions' | 'projects' | 'deadlines' | 'waiting' | 'memos'
 
 const LIST_HEADINGS: Record<ListType, string> = {
   actions: 'ACTIONS',
   projects: 'PROJECTS',
   deadlines: 'DEADLINES',
   waiting: 'WAITING',
+  memos: 'MEMOS',
 }
 
 export function renderList(s: Store, today: string, type: ListType): string {
@@ -334,6 +430,12 @@ export function renderList(s: Store, today: string, type: ListType): string {
     if (s.lists.length === 0) return `${heading} [0]:`
     const blocks = s.lists.map((p) => itemBlock(projectFields(p, s, 'list')))
     return section(heading, s.lists.length, blocks)
+  }
+  if (type === 'memos') {
+    const memos = orderMemos(allMemos(s))
+    if (memos.length === 0) return `${heading} [0]:`
+    const blocks = memos.map((memo) => itemBlock(memoFields(memo, s, 'list')))
+    return section(heading, memos.length, blocks)
   }
   const filtered: Item[] = s.items.filter((i) => {
     if (type === 'actions') return i.type === 'action'
@@ -347,6 +449,7 @@ export function renderList(s: Store, today: string, type: ListType): string {
 
 export function renderShow(s: Store, today: string, entity: List | Item): string {
   if (entity.type === 'project') return renderShowProject(s, today, entity)
+  if (entity.type === 'memo') return itemBlock(memoFields(entity, s, 'list'))
   return renderShowItem(s, today, entity)
 }
 
@@ -412,7 +515,7 @@ function renderShowProject(s: Store, today: string, p: ProjectList): string {
   return sections.filter((x) => x.length > 0).join('\n\n')
 }
 
-function renderShowItem(s: Store, today: string, i: Item): string {
+function renderShowItem(s: Store, today: string, i: ActionItem | WaitingItem | DeadlineItem): string {
   const typeName = i.type.toUpperCase()
   // Use 'list' context so status, project, closed_at are all included.
   const fields = dispatchFields(i, s, today, 'list')

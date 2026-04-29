@@ -1,9 +1,9 @@
 # todo — spec
 
-JSON-storage CLI for GTD-style projects, actions, waiting items, and deadlines.
-Agent-first: read commands return YAML-like structured blocks (with a
-`HINTS:` section surfacing what the dashboard hides); mutation commands
-return canonical entity JSON.
+JSON-storage CLI for GTD-style projects, actions, waiting items,
+deadlines, and memos. Agent-first: read commands return YAML-like
+structured blocks (with a `HINTS:` section surfacing what the focused
+dashboard hides); mutation commands return canonical entity JSON.
 
 ## Storage
 
@@ -113,7 +113,16 @@ type DeadlineItem = BaseItem & {
   closed_at: string | null     // non-null iff status='dropped'
 }
 
-type Item = ActionItem | WaitingItem | DeadlineItem
+type MemoItem = {
+  id: string
+  type: 'memo'
+  note: string                 // non-empty
+  pinned: boolean
+  project: string | null       // optional parent project id; null = standalone
+  created_at: string
+}
+
+type Item = ActionItem | WaitingItem | DeadlineItem | MemoItem
 
 type Store = { lists: List[]; items: Item[] }
 ```
@@ -129,7 +138,8 @@ type Store = { lists: List[]; items: Item[] }
 - `Item.project` references an existing `List.id` or is `null`.
 - `created_at` is set once on insert, never edited.
 - `id` is set once on insert, never reused, never edited.
-- Title is non-empty (whitespace-only rejected).
+- Titles on projects, actions, waiting items, and deadlines are non-empty
+  (whitespace-only rejected). Memo `note` is non-empty too.
 - `ActionItem.start_at` is only non-null when `status === 'deferred'`. Mutators
   that change status to anything else clear `start_at`.
 - `start_at` must be a strictly-future date (`> today` in host local TZ) at the
@@ -161,12 +171,14 @@ with non-zero exit.
 
 | Command | Returns |
 |---|---|
-| `todo` (bare, no subcommand) | The dashboard: live items + a `HINTS:` section if any trigger fires. |
-| `todo list <type>` | Flat enumeration of every item of that type (any status, including completed/dropped/past-date). `<type>` ∈ `actions`, `projects`, `deadlines`, `waiting`. |
-| `todo show <id>` | One entity with its fields. Projects also embed `ACTIVE ACTIONS`, `DEFERRED ACTIONS`, `WAITING`, `DEADLINES` sub-buckets scoped to the project (regardless of the project's own status). |
+| `todo` (bare, no subcommand) | The daily dashboard: pinned memos, live items, and a `HINTS:` section if any trigger fires. |
+| `todo review` | The weekly sweep: all memos, live and deferred work, active deadlines (including lapsed ones), and actionable hints. |
+| `todo list <type>` | Flat enumeration of every item of that type (any status, including completed/dropped/past-date). `<type>` ∈ `actions`, `projects`, `deadlines`, `waiting`, `memo`. |
+| `todo show <id>` | One entity with its fields. Projects also embed `ACTIVE ACTIONS`, `DEFERRED ACTIONS`, `WAITING`, `DEADLINES` sub-buckets scoped to the project (regardless of the project's own status). Memos render as a single YAML-like block. |
 
 **Dashboard buckets** (compared against host-local `YYYY-MM-DD`):
 
+- **Keep in mind**: `type=memo && pinned=true`.
 - **Active actions**: `type=action && parent.active && (status=active || (status=deferred && start_at != null && start_at <= today))`.
 - **Waiting**: `type=waiting && status=active && parent.active`.
 - **Deadlines**: `type=deadline && status=active && date >= today && parent.active`.
@@ -178,17 +190,25 @@ project are hidden from the dashboard. Terminal items, dropped deadlines,
 and past-date deadlines are not on the dashboard — reach them via
 `todo list <type>` (which shows everything regardless of status).
 
-**Hints** (`HINTS:` section appended to dashboard output and the project
-case of `show`). See [hints.md](./hints.md) for the catalog. v1 surfaces:
+`todo review` reuses the same active buckets but also includes:
+
+- **Memos**: all memos, pinned first then newest first.
+- **Deferred actions**: deferred actions still hidden from the dashboard.
+- **Deadlines**: all active deadlines, including lapsed ones.
+- **Deferred projects**: deferred projects still hidden from the dashboard.
+
+**Hints** (`HINTS:` section appended to dashboard and review output).
+See [hints.md](./hints.md) for the catalog. v1 surfaces:
 
 1. Recent lapsed deadlines (date passed within last 7 days, still active).
 2. Stalled active projects (no active actions, has at least one item).
 3. Stale waiting items (created >7 days ago, still active).
-4. Long-tail deferred count (informational; only when >0).
+4. Long-tail deferred count (informational; dashboard only, only when >0).
 
 Section is omitted entirely when no triggers fire.
 
-**Item block format** (used by dashboard buckets, `list <type>`, project sub-buckets):
+**Task/project block format** (used by dashboard buckets, `list <type>`,
+project sub-buckets, and project/deadline/action/waiting `show`):
 
 ```
 - id: <id>
@@ -212,25 +232,38 @@ emitted (no `<none>` placeholders for null).
 | `closed: <ts>` | only in `list <type>`, for terminal items |
 | `note: "<text>"` | when set. Dashboard / `list` / project sub-buckets: newlines flattened to spaces, truncated to ~150 chars at a soft word boundary. `show <id>`: full text un-truncated; rendered as a YAML `\|`-block scalar when the note contains newlines. |
 
+**Memo block format** (`KEEP IN MIND`, `MEMOS`, `list memo`, `show <memo-id>`):
+
+```
+- id: <id>
+  note: "<text>"      # or a `|` block scalar when multi-line
+  project: <Title> [<id>]   # if attached
+  pinned: true|false        # omitted on dashboard, because KEEP IN MIND implies pinned
+```
+
 `todo show <id>` emits a header line `<TYPE>: "<title>" [<id>]` followed
 by flush-left key/value lines (no indent, no leading dash) for the
 entity's body fields, plus a `created: <ts>` field at the end. For
 projects: header, body (status/closed/created/note only — no child
 counts), then `ACTIVE ACTIONS [N]:`, `DEFERRED ACTIONS [N]:`,
 `WAITING [N]:`, `DEADLINES [N]:` sub-buckets enumerating the children.
-`show` does not emit a `HINTS:` section — Hints are dashboard-scoped
-(global to the store), not project-scoped.
+Memos are the exception: `todo show <memo-id>` prints the single memo
+block directly, with no `MEMO:` header. `show` does not emit a `HINTS:`
+section — Hints are global read-surface signals, not entity-scoped.
 
 ### Create
 
-Verb-first: `todo add <type> --title "..." [type-specific flags]`.
+Verb-first. At most one free-text positional per command, and it is the
+command's primary subject. All modifiers are flags. All non-primary
+required fields stay flags.
 
 ```
-todo add project  --title "<text>" [--note <text>] [--parent <root-project-id>]
-todo add action   --title "<text>" (--active | --deferred | --start <date>)
-                                   [--project <id>] [--due <date>] [--note <text>]
-todo add waiting  --title "<text>" [--project <id>] [--note <text>]
-todo add deadline --title "<text>" --date <date> [--project <id>] [--note <text>]
+todo add project  "<text>" [--note <text>] [--parent <root-project-id>]
+todo add action   "<text>" (--active | --deferred | --start <date>)
+                             [--project <id>] [--due <date>] [--note <text>]
+todo add waiting  "<text>" [--project <id>] [--note <text>]
+todo add deadline "<text>" --date <date> [--project <id>] [--note <text>]
+todo add memo     "<text>" [--pinned] [--project <id>]
 ```
 
 - `add project` creates a `ProjectList` at `status=active`.
@@ -244,6 +277,8 @@ todo add deadline --title "<text>" --date <date> [--project <id>] [--note <text>
 - `add waiting` creates a `WaitingItem` at `status=active`. No `--due`, no `--start`.
 - `add deadline` creates a `DeadlineItem` at `status=active`. `--date` is
   required and must be a future date (today and past dates rejected).
+- `add memo` creates a `MemoItem`. The positional text becomes `note`.
+  `--pinned` defaults to false.
 - `--project <id>` must reference an existing project.
 
 ### Edit (polymorphic on id)
@@ -254,14 +289,14 @@ todo add deadline --title "<text>" --date <date> [--project <id>] [--note <text>
 ```
 todo edit <id> [--active | --deferred | --completed | --dropped]
               [--start <date>]
-              [--title ...] [--note ...] [--note-append ...]
+              [--title ...] [--note ...] [--pinned | --no-pinned] [--note-append ...]
               [--due ...] [--project ...] [--parent ...] [--date ...]
 ```
 
 Field semantics:
 
 - Omit a flag to leave the field unchanged.
-- Pass `""` to clear: `--note ""`, `--due ""`, `--project ""`, `--start ""`.
+- Pass `""` to clear: `--due ""`, `--project ""`, `--start ""`.
 - `--title ""` is rejected (title is required).
 - `--date ""` is rejected (deadline date is required).
 - `--note-append <text>` appends `<text>` to the existing `note`, joined
@@ -283,6 +318,15 @@ Field semantics:
   `closed_at` (the schedule overrides the closed state).
 - `--start ""` clears `start_at` without changing status.
 - Empty patch (no flags) → error: `nothing to edit`.
+
+Memo-specific rules:
+
+- Memos accept `--note`, `--pinned` / `--no-pinned`, and `--project`.
+- `--note ""` is rejected (`note is required and cannot be empty`).
+- `--project ""` detaches the memo from its project.
+- Other entity types reject `--note` and `--pinned` / `--no-pinned`.
+- Memos reject `--title`, lifecycle flags, `--start`, `--due`, `--date`,
+  `--parent`, and `--note-append`.
 
 Status semantics:
 
@@ -316,11 +360,14 @@ Lifecycle effects:
 
 Entity-type rules:
 
+- `activate`, `defer`, and `complete` reject memo ids with
+  `<id> is a memo and has no status`.
 - `--active` and `--deferred` reject waiting items (waiting has no `deferred`
   state and no resurrection path; terminal waiting items stay terminal).
 - `--start` rejects projects, waiting items, and deadlines.
 - `complete` and `defer` reject deadlines (deadlines are not tasks; they
   only transition to `dropped`, and `activate` un-drops).
+- `drop` hard-deletes memos from `items[]` and returns the last memo JSON.
 - `activate`/`defer` are also how you bring a completed/dropped action or
   project back to a live state — they clear `closed_at`. There is no
   `reopen` verb.

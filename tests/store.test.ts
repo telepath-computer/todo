@@ -206,20 +206,7 @@ describe('readStore / writeStore', () => {
     }
   })
 
-  it('normalizes a pre-meta store (no meta key) to meta: { context: null }', () => {
-    const dir = makeTempDataDir()
-    try {
-      mkdirSync(dir, { recursive: true })
-      const raw = JSON.stringify(EMPTY_STORE)
-      writeFileSync(join(dir, 'store.json'), raw)
-      const back = readStore(dir)
-      assert.deepEqual(back.meta, { context: null })
-    } finally {
-      cleanup(dir)
-    }
-  })
-
-  it('preserves existing meta.context on read', () => {
+  it('migrates legacy meta.context into a pinned memo on read', () => {
     const dir = makeTempDataDir()
     try {
       mkdirSync(dir, { recursive: true })
@@ -230,7 +217,66 @@ describe('readStore / writeStore', () => {
       })
       writeFileSync(join(dir, 'store.json'), raw)
       const back = readStore(dir)
-      assert.equal(back.meta.context, 'heads-down on demo')
+      assert.equal('meta' in back, false)
+      assert.equal(back.items.length, 1)
+      const memo = back.items[0]
+      assert.equal(memo.type, 'memo')
+      assert.equal(memo.note, 'heads-down on demo')
+      assert.equal(memo.pinned, true)
+      assert.equal(memo.project, null)
+      assert.match(memo.id, /^[0-9a-zA-Z]{8}$/)
+      assert.match(memo.created_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+    } finally {
+      cleanup(dir)
+    }
+  })
+
+  it('drops empty or whitespace-only legacy meta.context without creating a memo', () => {
+    const dir = makeTempDataDir()
+    try {
+      mkdirSync(dir, { recursive: true })
+      for (const value of ['', '   \n  ']) {
+        writeFileSync(
+          join(dir, 'store.json'),
+          JSON.stringify({
+            meta: { context: value },
+            lists: [],
+            items: [],
+          }),
+        )
+        const back = readStore(dir)
+        assert.equal('meta' in back, false)
+        assert.deepEqual(back, EMPTY_STORE)
+      }
+    } finally {
+      cleanup(dir)
+    }
+  })
+
+  it('drops the legacy meta field from the written store after migration', () => {
+    const dir = makeTempDataDir()
+    try {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(
+        join(dir, 'store.json'),
+        JSON.stringify({
+          meta: { context: 'heads-down on demo' },
+          lists: [],
+          items: [],
+        }),
+      )
+      const migrated = readStore(dir)
+      writeStore(dir, migrated)
+      const raw = readFileSync(join(dir, 'store.json'), 'utf8')
+      assert.doesNotMatch(raw, /"meta"/)
+      const back = JSON.parse(raw) as {
+        items: Array<{ type: string; note: string; pinned: boolean; project: string | null }>
+      }
+      assert.equal(back.items.length, 1)
+      assert.equal(back.items[0].type, 'memo')
+      assert.equal(back.items[0].note, 'heads-down on demo')
+      assert.equal(back.items[0].pinned, true)
+      assert.equal(back.items[0].project, null)
     } finally {
       cleanup(dir)
     }

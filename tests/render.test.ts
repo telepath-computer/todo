@@ -4,6 +4,7 @@ import {
   EMPTY_STORE,
   addAction,
   addDeadline,
+  addMemo,
   addProject,
   addWaiting,
   setStatus,
@@ -15,6 +16,7 @@ import {
   quote,
   renderDashboard,
   renderList,
+  renderReview,
   renderShow,
   totalDeferredItems,
   truncateNote,
@@ -131,17 +133,14 @@ function seed(): Store {
 // ---- Dashboard ------------------------------------------------------
 
 describe('renderDashboard', () => {
-  it('renders empty store with only the empty CONTEXT placeholder block', () => {
-    const out = renderDashboard(EMPTY_STORE, TODAY)
-    assert.match(out, /^CONTEXT: \|\n  \(empty — agent: store/)
-    assert.ok(!out.includes('ACTIVE ACTIONS'))
-    assert.ok(!out.includes('WAITING'))
+  it('renders an empty store as empty output', () => {
+    assert.equal(renderDashboard(EMPTY_STORE, TODAY), '')
   })
 
-  it('renders all four buckets in canonical order without status, prepended with empty CONTEXT block', () => {
+  it('renders the live buckets in canonical order without status', () => {
     const s = seed()
     const out = renderDashboard(s, TODAY)
-    const after = [
+    const expected = [
       'ACTIVE ACTIONS [2]:',
       '',
       '- id: A1',
@@ -176,33 +175,37 @@ describe('renderDashboard', () => {
       '  deadlines: 1',
       '  note: "Indie thinking tool"',
     ].join('\n')
-    assert.match(out, /^CONTEXT: \|\n  \(empty — agent: store/)
-    assert.ok(out.endsWith(after), `expected dashboard to end with seed sections, got tail: ${out.slice(-200)}`)
+    assert.equal(out, expected)
   })
 
-  it('omits empty buckets entirely (CONTEXT placeholder still shown)', () => {
+  it('omits empty buckets entirely', () => {
     let s: Store = EMPTY_STORE
     s = addAction(s, { id: 'A1', created_at: T0, title: 'Just an action', status: 'active' }).store
     const out = renderDashboard(s, TODAY)
-    assert.match(out, /^CONTEXT: \|/m)
     assert.ok(out.includes('ACTIVE ACTIONS'))
     assert.ok(!out.includes('WAITING'))
     assert.ok(!out.includes('DEADLINES'))
     assert.ok(!out.includes('ACTIVE PROJECTS'))
   })
 
-  it('renders set context as a YAML block scalar at the top', () => {
-    const s: Store = { ...EMPTY_STORE, meta: { context: 'heads-down on demo' } }
+  it('renders pinned memos under KEEP IN MIND before the live buckets', () => {
+    let s = seed()
+    s = addMemo(s, {
+      id: 'M1',
+      created_at: '2026-04-28T10:00:00Z',
+      note: 'Sam is in hospital',
+      pinned: true,
+    }).store
     const out = renderDashboard(s, TODAY)
-    assert.ok(out.startsWith('CONTEXT: |\n  heads-down on demo'), out)
-    assert.ok(!out.includes('(empty — agent:'), out)
+    assert.ok(out.startsWith('KEEP IN MIND [1]:\n\n- id: M1\n  note: "Sam is in hospital"'), out)
+    assert.ok(!out.includes('pinned:'), out)
+    assert.match(out, /\n\nACTIVE ACTIONS \[2\]:/)
   })
 
-  it('renders multi-line context as a block scalar with each line indented 2 spaces', () => {
-    const body = 'today: ship demo prep\nthis week: heads-down\nsee Notes/Q3.md'
-    const s: Store = { ...EMPTY_STORE, meta: { context: body } }
-    const out = renderDashboard(s, TODAY)
-    assert.ok(out.startsWith('CONTEXT: |\n  today: ship demo prep\n  this week: heads-down\n  see Notes/Q3.md'), out)
+  it('omits KEEP IN MIND when there are no pinned memos', () => {
+    let s: Store = EMPTY_STORE
+    s = addMemo(s, { id: 'M1', created_at: T0, note: 'fact', pinned: false }).store
+    assert.doesNotMatch(renderDashboard(s, TODAY), /^KEEP IN MIND/m)
   })
 
   it('appends Hints section when provided', () => {
@@ -276,6 +279,29 @@ describe('renderList', () => {
 
   it('renders empty types as just the count-zero heading', () => {
     assert.equal(renderList(EMPTY_STORE, TODAY, 'actions'), 'ACTIONS [0]:')
+  })
+
+  it('renders memos pinned-first with full multi-line notes', () => {
+    let s: Store = EMPTY_STORE
+    s = addMemo(s, {
+      id: 'M1',
+      created_at: '2026-04-27T10:00:00Z',
+      note: 'line one\nline two',
+      pinned: false,
+    }).store
+    s = addMemo(s, {
+      id: 'M2',
+      created_at: '2026-04-28T10:00:00Z',
+      note: 'pinned first',
+      pinned: true,
+    }).store
+    const out = renderList(s, TODAY, 'memos')
+    assert.ok(out.startsWith('MEMOS [2]:'))
+    assert.match(out, /- id: M2[\s\S]+pinned: true[\s\S]+- id: M1/)
+    assert.ok(out.includes('  note: |'))
+    assert.ok(out.includes('    line one'))
+    assert.ok(out.includes('    line two'))
+    assert.ok(out.includes('  pinned: false'))
   })
 })
 
@@ -353,6 +379,24 @@ describe('renderShow non-projects', () => {
     const out = renderShow(s, TODAY, a)
     assert.ok(!out.includes('project:'))
   })
+
+  it('renders memos as a single YAML-like block without a type header', () => {
+    const s = addMemo(EMPTY_STORE, {
+      id: 'M1',
+      created_at: T0,
+      note: 'remember this\nwith two lines',
+      pinned: true,
+    }).store
+    const memo = s.items[0]
+    const expected = [
+      '- id: M1',
+      '  note: |',
+      '    remember this',
+      '    with two lines',
+      '  pinned: true',
+    ].join('\n')
+    assert.equal(renderShow(s, TODAY, memo), expected)
+  })
 })
 
 // ---- Show project ---------------------------------------------------
@@ -413,6 +457,35 @@ describe('totalDeferredItems', () => {
     s = setStatus(s, 'P1', { status: 'deferred', start_at: null }).store
     // P1 deferred + A3 deferred + A4 deferred (start_at future, deferred bucket)
     assert.equal(totalDeferredItems(s, TODAY), 3)
+  })
+})
+
+describe('renderReview', () => {
+  it('renders memos, deferred sections, lapsed deadlines, and hints in review order', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'Telepath' }).store
+    s = addProject(s, { id: 'P2', created_at: T0, title: 'Later' }).store
+    s = setStatus(s, 'P2', { status: 'deferred', start_at: null }).store
+    s = addMemo(s, { id: 'M1', created_at: '2026-04-27T10:00:00Z', note: 'older unpinned' }).store
+    s = addMemo(s, {
+      id: 'M2',
+      created_at: '2026-04-28T10:00:00Z',
+      note: 'newer pinned',
+      pinned: true,
+    }).store
+    s = addAction(s, { id: 'A1', created_at: T0, title: 'next', status: 'active', project: 'P1' }).store
+    s = addAction(s, { id: 'A2', created_at: T0, title: 'later', status: 'deferred' }).store
+    s = addWaiting(s, { id: 'W1', created_at: '2026-04-15T10:00:00Z', title: 'reply', project: 'P1' }).store
+    s = addDeadline(s, { id: 'D1', created_at: T0, title: 'lapsed', date: '2026-04-20', project: 'P1' }).store
+
+    const out = renderReview(s, TODAY, '- stale waiting\n')
+    assert.match(
+      out,
+      /^MEMOS \[2\]:[\s\S]*ACTIVE ACTIONS \[1\]:[\s\S]*DEFERRED ACTIONS \[1\]:[\s\S]*WAITING \[1\]:[\s\S]*DEADLINES \[1\]:[\s\S]*ACTIVE PROJECTS \[1\]:[\s\S]*DEFERRED PROJECTS \[1\]:[\s\S]*HINTS:/,
+    )
+    assert.match(out, /- id: M2[\s\S]+pinned: true[\s\S]+- id: M1/)
+    assert.ok(out.includes('  date: 2026-04-20 (passed 7 days ago)'))
+    assert.ok(out.endsWith('HINTS:\n\n- stale waiting'))
   })
 })
 

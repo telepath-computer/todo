@@ -23,21 +23,23 @@ src/
 ├── cli.ts                 commander wiring
 ├── commands/              thin glue: parse args → call core → render → write/print
 │   ├── add.ts             addProjectCmd / addActionCmd / addWaitingCmd / addDeadlineCmd
+│   ├── addMemo.ts         addMemoCmd
 │   ├── config.ts          config (read/list/write keys; data_dir)
 │   ├── dashboard.ts       bare `todo` — calls renderDashboard + renderHints
-│   ├── edit.ts            polymorphic on entity (project / action / waiting / deadline)
+│   ├── edit.ts            polymorphic on entity (project / action / waiting / deadline / memo)
 │   ├── lifecycle.ts       activate / defer / complete / drop
 │   ├── list.ts            `todo list <type>` flat enumeration
+│   ├── review.ts          `todo review` — broader weekly read surface
 │   ├── shared.ts          json() helper
-│   └── show.ts            single-entity narrative (projects embed children + Hints)
+│   └── show.ts            single-entity narrative (projects embed children; memos render as blocks)
 └── core/
     ├── config.ts          ~/.todo/config.json + data_dir resolution (env > config > default)
     ├── dates.ts           --due / --date parser (chrono-node), todayLocal, requireFutureDate
     ├── errors.ts          DoError, NotFound, NothingToEdit, InvalidArgument, InvalidDate
-    ├── hints.ts           Hint trigger functions (lapsed deadlines, stalled projects, stale waiting, deferred count) + renderHints composer
-    ├── model.ts           types, mutators, bucket helpers, resolveRef, lookups
-    ├── render.ts          narrative formatting: dayDelta, modifiers, item lines, project lines, dashboard, list, show
-    └── store.ts           store.json I/O, atomic write, nanoid, sorted-key stringify
+    ├── hints.ts           Hint trigger functions (lapsed deadlines, stalled projects, stale waiting, deferred count) + mode-aware renderHints composer
+    ├── model.ts           types, mutators, memo helpers, bucket helpers, resolveRef, lookups
+    ├── render.ts          narrative formatting: dayDelta, modifiers, item lines, memo blocks, dashboard, review, list, show
+    └── store.ts           store.json I/O, atomic write, nanoid, sorted-key stringify, one-shot legacy context→memo migration
 ```
 
 ### Layer rules
@@ -48,7 +50,9 @@ src/
   so the CLI surfaces a clean message instead of a stack trace. `readStore`
   also normalises forward-compatibility fields — actions written by older
   versions get any missing fields (e.g. `start_at`) defaulted to `null` on
-  read, so the rest of the code can treat the schema as strict.
+  read, so the rest of the code can treat the schema as strict. The one
+  legacy migration is `meta.context`: on read, a non-empty value becomes a
+  pinned memo and the field is dropped from the normalized store.
 - **`model.ts`** is pure. No I/O, no `Date.now()`, no `process.env`. Mutators
   take the current `Store` and an input that includes any non-deterministic
   values (`id`, `created_at`, `ts`); they return `{ store, entity }`.
@@ -56,9 +60,12 @@ src/
   exactly the data it needs (`closed_at` for terminal, `start_at` for
   deferred). Validators throw typed errors. Bucket helpers (`liveActions`,
   `deferredActions`, `liveWaiting`, `activeProjects`, `deferredProjects`,
-  `activeDeadlines`) implement filter rules including parent-state cascade
-  and the past-due-scheduled bridge: a deferred action with `start_at <= today`
-  shows up in `liveActions` and is excluded from `deferredActions`.
+  `activeDeadlines`, `reviewDeadlines`, `allMemos`, `pinnedMemos`) implement
+  filter rules including parent-state cascade and the past-due-scheduled
+  bridge: a deferred action with `start_at <= today` shows up in
+  `liveActions` and is excluded from `deferredActions`. Memos are items too,
+  but they deliberately have no status; `setStatus` rejects memo ids and
+  `drop` hard-deletes them.
   `activeDeadlines` and the action helpers all take a `today: string`
   (YYYY-MM-DD) parameter so the model stays free of `Date.now()`;
   `commands/list.ts` computes today via `todayLocal()`.
@@ -70,7 +77,8 @@ src/
   check. `TODO_DATA_DIR=relative/foo` fails fast on resolve.
 - **`commands/*.ts`** each export one or two functions; every command body is
   the same shape: resolve data dir → read store → mutate via model → write
-  store → return JSON. No business logic.
+  store → return JSON, or resolve data dir → read store → render a read
+  surface. No business logic.
 - **`cli.ts`** is commander wiring + a single `try/catch` that prints
   `todo: <DoError.message>` to stderr and exits 1. Anything other than a
   `DoError` propagates as a stack trace (programmer bug).
@@ -92,13 +100,11 @@ Test runner: `node --import tsx --test tests/*.test.ts`. Three layers:
   pure-function tests for mutators, invariants, bucket-helper filtering,
   immutability, sorted-key serialization, atomic write, env > config > default
   resolution, `requireAbsolute` rejection, malformed-store error.
-- **E2E (`cli.e2e.test.ts`):** spawns the compiled `dist/cli.js` via
+- **E2E (`cli.e2e.test.ts`, `memos.e2e.test.ts`):** spawns the compiled `dist/cli.js` via
   `child_process.spawnSync` with a sandboxed `$HOME` and `TODO_DATA_DIR`.
-  Every one of the 13 commands has at least one happy-path test plus error
-  paths (NotFound, NothingToEdit, mutually-exclusive flags, waiting +
-  lifecycle, deadline + lifecycle, past-date rejection on add and edit,
-  parent-deferred cascade, relative paths, malformed store, unparseable
-  `--due`/`--date`, chrono natural language).
+  Covers the daily dashboard, review, positional add commands, memo CRUD,
+  lifecycle errors, parent-deferred cascade, malformed store, relative
+  paths, and natural-language date parsing.
 
 ## Conventions
 
@@ -113,6 +119,6 @@ Test runner: `node --import tsx --test tests/*.test.ts`. Three layers:
 - **Empty patches:** edit mutators reject `{}` with `NothingToEdit`. The CLI
   passes through whatever flags commander parsed; "no flags" produces an
   empty patch.
-- **Clearing:** the CLI translates `--note ""` to `null` before calling the
-  mutator. The mutator sees `note: null` and stores it. The mutator never
-  sees the empty string.
+- **Clearing:** `--due ""`, `--project ""`, and `--start ""` are translated
+  by the CLI before calling the mutator. Memo `--note ""` is not a clear;
+  it is rejected because memo bodies are required.

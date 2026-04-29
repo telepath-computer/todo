@@ -7,10 +7,12 @@ import {
   activeProjects,
   addAction,
   addDeadline,
+  addMemo,
   addProject,
   addWaiting,
+  allMemos,
   appendNote,
-  appendStoreContext,
+  deleteMemo,
   deferredActions,
   deferredProjects,
   editItem,
@@ -22,11 +24,12 @@ import {
   isTerminal,
   liveActions,
   liveWaiting,
+  pinnedMemos,
   resolveRef,
   setStatus,
-  setStoreContext,
   type ActionItem,
   type DeadlineItem,
+  type MemoItem,
   type ProjectList,
   type Store,
   type WaitingItem,
@@ -166,13 +169,59 @@ describe('addWaiting', () => {
   })
 })
 
+describe('addMemo', () => {
+  it('creates an unpinned memo by default', () => {
+    const { entity, store } = addMemo(EMPTY_STORE, {
+      id: 'M1',
+      created_at: T0,
+      note: 'Sam is in hospital',
+    })
+    assert.equal(entity.type, 'memo')
+    assert.equal(entity.note, 'Sam is in hospital')
+    assert.equal(entity.pinned, false)
+    assert.equal(entity.project, null)
+    assert.equal(entity.created_at, T0)
+    assert.equal(store.items.length, 1)
+  })
+
+  it('creates a pinned project memo', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
+    const { entity } = addMemo(s, {
+      id: 'M1',
+      created_at: T0,
+      note: 'Keep this in view',
+      pinned: true,
+      project: 'P1',
+    })
+    assert.equal(entity.pinned, true)
+    assert.equal(entity.project, 'P1')
+  })
+
+  it('rejects empty note', () => {
+    assert.throws(
+      () => addMemo(EMPTY_STORE, { id: 'M1', created_at: T0, note: '   ' }),
+      InvalidArgument,
+    )
+  })
+
+  it('rejects unknown project ids', () => {
+    assert.throws(
+      () => addMemo(EMPTY_STORE, { id: 'M1', created_at: T0, note: 'x', project: 'NOPE' }),
+      InvalidArgument,
+    )
+  })
+})
+
 describe('findEntity', () => {
   it('looks up across lists and items', () => {
-    const s = seed()
+    let s = seed()
+    s = addMemo(s, { id: 'M1', created_at: T0, note: 'remember this' }).store
     assert.equal(findList(s, 'P1')?.id, 'P1')
     assert.equal(findItem(s, 'A1')?.id, 'A1')
     assert.equal(findEntity(s, 'P1')?.id, 'P1')
     assert.equal(findEntity(s, 'W1')?.id, 'W1')
+    assert.equal(findEntity(s, 'M1')?.id, 'M1')
     assert.equal(findEntity(s, 'NOPE'), undefined)
   })
 })
@@ -250,6 +299,35 @@ describe('editItem', () => {
   it('throws NothingToEdit when no fields', () => {
     assert.throws(() => editItem(seed(), 'A1', {}), NothingToEdit)
   })
+
+  it('updates memo note, pinned flag, and project', () => {
+    let s: Store = EMPTY_STORE
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
+    s = addMemo(s, { id: 'M1', created_at: T0, note: 'old note' }).store
+    const { entity } = editItem(s, 'M1', {
+      note: 'new note',
+      pinned: true,
+      project: 'P1',
+    })
+    assert.equal(entity.type, 'memo')
+    assert.equal((entity as MemoItem).note, 'new note')
+    assert.equal((entity as MemoItem).pinned, true)
+    assert.equal(entity.project, 'P1')
+  })
+
+  it('rejects empty memo note', () => {
+    let s = addMemo(EMPTY_STORE, { id: 'M1', created_at: T0, note: 'x' }).store
+    assert.throws(() => editItem(s, 'M1', { note: '' }), InvalidArgument)
+    assert.throws(() => editItem(s, 'M1', { note: '   ' }), InvalidArgument)
+  })
+
+  it('rejects non-memo fields on memos', () => {
+    let s = addMemo(EMPTY_STORE, { id: 'M1', created_at: T0, note: 'x' }).store
+    assert.throws(() => editItem(s, 'M1', { title: 'nope' }), InvalidArgument)
+    assert.throws(() => editItem(s, 'M1', { due: '2026-05-01' }), InvalidArgument)
+    assert.throws(() => editItem(s, 'M1', { start_at: FUTURE }), InvalidArgument)
+    assert.throws(() => editItem(s, 'M1', { date: '2026-05-01' }), InvalidArgument)
+  })
 })
 
 describe('setStatus', () => {
@@ -313,6 +391,14 @@ describe('setStatus', () => {
     const { entity } = setStatus(seed(), 'P1', { status: 'dropped', closed_at: T0 })
     assert.equal((entity as ProjectList).status, 'dropped')
     assert.equal((entity as ProjectList).closed_at, T0)
+  })
+
+  it('rejects status changes on memo ids', () => {
+    const s = addMemo(EMPTY_STORE, { id: 'M1', created_at: T0, note: 'x' }).store
+    assert.throws(
+      () => setStatus(s, 'M1', { status: 'active' }),
+      (err: Error) => err instanceof InvalidArgument && /M1 is a memo and has no status/.test(err.message),
+    )
   })
 
   it('completed and dropped are mutually exclusive (closed reflects last write)', () => {
@@ -428,10 +514,12 @@ describe('immutability', () => {
 
 describe('resolveRef', () => {
   it('returns lists and items by id', () => {
-    const s = seed()
+    let s = seed()
+    s = addMemo(s, { id: 'M1', created_at: T0, note: 'remember this' }).store
     assert.equal(resolveRef(s, 'P1').id, 'P1')
     assert.equal(resolveRef(s, 'A1').id, 'A1')
     assert.equal(resolveRef(s, 'W1').id, 'W1')
+    assert.equal(resolveRef(s, 'M1').id, 'M1')
   })
 
   it('throws NotFound on unknown id', () => {
@@ -836,61 +924,40 @@ describe('sub-projects', () => {
   })
 })
 
-// Top-level context --------------------------------------------------
-
-describe('store-level context', () => {
-  it('EMPTY_STORE has meta.context = null', () => {
-    assert.equal(EMPTY_STORE.meta.context, null)
+describe('memo selectors', () => {
+  it('allMemos returns memos only', () => {
+    let s = seed()
+    s = addMemo(s, { id: 'M1', created_at: T0, note: 'first' }).store
+    s = addMemo(s, { id: 'M2', created_at: T0, note: 'second', pinned: true }).store
+    assert.deepEqual(allMemos(s).map((m) => m.id), ['M1', 'M2'])
   })
 
-  it('setStoreContext replaces with body', () => {
-    const next = setStoreContext(EMPTY_STORE, 'heads-down')
-    assert.equal(next.meta.context, 'heads-down')
+  it('pinnedMemos returns pinned memos only', () => {
+    let s: Store = EMPTY_STORE
+    s = addMemo(s, { id: 'M1', created_at: T0, note: 'first' }).store
+    s = addMemo(s, { id: 'M2', created_at: T0, note: 'second', pinned: true }).store
+    assert.deepEqual(pinnedMemos(s).map((m) => m.id), ['M2'])
+  })
+})
+
+describe('deleteMemo', () => {
+  it('hard-deletes the memo from items', () => {
+    let s = addMemo(EMPTY_STORE, { id: 'M1', created_at: T0, note: 'first' }).store
+    s = addAction(s, { id: 'A1', created_at: T0, title: 'A', status: 'active' }).store
+    const next = deleteMemo(s, 'M1')
+    assert.equal(findItem(next, 'M1'), undefined)
+    assert.equal(findItem(next, 'A1')?.id, 'A1')
   })
 
-  it('setStoreContext clears with null', () => {
-    const set = setStoreContext(EMPTY_STORE, 'foo')
-    const cleared = setStoreContext(set, null)
-    assert.equal(cleared.meta.context, null)
+  it('throws NotFound for unknown ids', () => {
+    assert.throws(() => deleteMemo(EMPTY_STORE, 'NOPE'), NotFound)
   })
 
-  it('setStoreContext treats empty string as null (clear)', () => {
-    const set = setStoreContext(EMPTY_STORE, 'foo')
-    const cleared = setStoreContext(set, '')
-    assert.equal(cleared.meta.context, null)
-  })
-
-  it('appendStoreContext sets when null', () => {
-    const next = appendStoreContext(EMPTY_STORE, 'first')
-    assert.equal(next.meta.context, 'first')
-  })
-
-  it('appendStoreContext joins with a blank line when set', () => {
-    let s = setStoreContext(EMPTY_STORE, 'first')
-    s = appendStoreContext(s, 'second')
-    assert.equal(s.meta.context, 'first\n\nsecond')
-  })
-
-  it('appendStoreContext rejects empty / whitespace body', () => {
-    assert.throws(() => appendStoreContext(EMPTY_STORE, ''), InvalidArgument)
-    assert.throws(() => appendStoreContext(EMPTY_STORE, '   '), InvalidArgument)
-  })
-
-  it('does not mutate the input store', () => {
-    const before = EMPTY_STORE
-    setStoreContext(before, 'x')
-    assert.equal(before.meta.context, null)
-    const set = setStoreContext(EMPTY_STORE, 'a')
-    appendStoreContext(set, 'b')
-    assert.equal(set.meta.context, 'a')
-  })
-
-  it('preserves lists and items unchanged', () => {
-    let s = setStoreContext(EMPTY_STORE, 'ctx')
-    s = addProject(s, { id: 'P', created_at: T0, title: 'P' }).store
-    assert.equal(s.meta.context, 'ctx')
-    assert.equal(s.lists.length, 1)
-    s = appendStoreContext(s, 'more')
-    assert.equal(s.lists.length, 1)
+  it('throws InvalidArgument for non-memo ids', () => {
+    const s = addAction(EMPTY_STORE, { id: 'A1', created_at: T0, title: 'A', status: 'active' }).store
+    assert.throws(
+      () => deleteMemo(s, 'A1'),
+      (err: Error) => err instanceof InvalidArgument && /A1 is not a memo/.test(err.message),
+    )
   })
 })

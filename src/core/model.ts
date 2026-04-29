@@ -51,19 +51,23 @@ export type DeadlineItem = BaseItem & {
   closed_at: string | null     // non-null iff status='dropped'
 }
 
-export type Item = ActionItem | WaitingItem | DeadlineItem
-
-export type StoreMeta = {
-  context: string | null
+export type MemoItem = {
+  id: string
+  type: 'memo'
+  note: string
+  pinned: boolean
+  project: string | null
+  created_at: string
 }
 
+export type Item = ActionItem | WaitingItem | DeadlineItem | MemoItem
+
 export type Store = {
-  meta: StoreMeta
   lists: List[]
   items: Item[]
 }
 
-export const EMPTY_STORE: Store = { meta: { context: null }, lists: [], items: [] }
+export const EMPTY_STORE: Store = { lists: [], items: [] }
 
 const TERMINAL_STATUSES: ReadonlySet<Status> = new Set(['completed', 'dropped'])
 
@@ -108,6 +112,11 @@ function requireValidTitle(t: string): string {
   return t
 }
 
+function requireValidNote(note: string): string {
+  if (note.trim().length === 0) throw new InvalidArgument('note is required and cannot be empty')
+  return note
+}
+
 function requireListExists(s: Store, listId: string | null | undefined): void {
   if (listId === null || listId === undefined) return
   if (!findList(s, listId)) throw new InvalidArgument(`unknown project: ${listId}`)
@@ -133,6 +142,21 @@ function replaceList(s: Store, next: List): Store {
 
 function replaceItem(s: Store, next: Item): Store {
   return { ...s, items: s.items.map((i) => (i.id === next.id ? next : i)) }
+}
+
+export function deleteMemo(s: Store, id: string): Store {
+  const memo = findItem(s, id)
+  if (!memo) throw new NotFound(`not found: ${id}`)
+  if (memo.type !== 'memo') throw new InvalidArgument(`${id} is not a memo`)
+  return { ...s, items: s.items.filter((i) => i.id !== id) }
+}
+
+export function allMemos(s: Store): MemoItem[] {
+  return s.items.filter((i): i is MemoItem => i.type === 'memo')
+}
+
+export function pinnedMemos(s: Store): MemoItem[] {
+  return allMemos(s).filter((memo) => memo.pinned)
 }
 
 // Insert ---------------------------------------------------------------
@@ -241,19 +265,25 @@ export function addDeadline(s: Store, input: AddDeadlineInput): { store: Store; 
   return { store: { ...s, items: [...s.items, entity] }, entity }
 }
 
-// Top-level context ----------------------------------------------------
-
-export function setStoreContext(s: Store, body: string | null): Store {
-  const next = body === null || body === '' ? null : body
-  return { ...s, meta: { ...s.meta, context: next } }
+export type AddMemoInput = {
+  id: string
+  created_at: string
+  note: string
+  pinned?: boolean
+  project?: string | null
 }
 
-export function appendStoreContext(s: Store, body: string): Store {
-  if (body.trim().length === 0) {
-    throw new InvalidArgument('body is required and cannot be empty')
+export function addMemo(s: Store, input: AddMemoInput): { store: Store; entity: MemoItem } {
+  requireListExists(s, input.project)
+  const entity: MemoItem = {
+    id: input.id,
+    type: 'memo',
+    note: requireValidNote(input.note),
+    pinned: input.pinned ?? false,
+    project: input.project ?? null,
+    created_at: input.created_at,
   }
-  const next = s.meta.context === null ? body : `${s.meta.context}\n\n${body}`
-  return { ...s, meta: { ...s.meta, context: next } }
+  return { store: { ...s, items: [...s.items, entity] }, entity }
 }
 
 // Note append ----------------------------------------------------------
@@ -280,7 +310,11 @@ export function appendNote(
     const updated: WaitingItem = { ...e, note: next }
     return { store: replaceItem(s, updated), entity: updated }
   }
-  const updated: DeadlineItem = { ...e, note: next }
+  if (e.type === 'deadline') {
+    const updated: DeadlineItem = { ...e, note: next }
+    return { store: replaceItem(s, updated), entity: updated }
+  }
+  const updated: MemoItem = { ...e, note: next }
   return { store: replaceItem(s, updated), entity: updated }
 }
 
@@ -319,6 +353,7 @@ export function editList(s: Store, id: string, patch: EditListPatch): { store: S
 export type EditItemPatch = {
   title?: string
   note?: string | null
+  pinned?: boolean
   due?: string | null
   project?: string | null
   start_at?: string | null
@@ -331,12 +366,26 @@ export function editItem(s: Store, id: string, patch: EditItemPatch): { store: S
   if (
     patch.title === undefined &&
     patch.note === undefined &&
+    patch.pinned === undefined &&
     patch.due === undefined &&
     patch.project === undefined &&
     patch.start_at === undefined &&
     patch.date === undefined
   ) {
     throw new NothingToEdit('nothing to edit')
+  }
+  if (item.type === 'memo') {
+    if (patch.title !== undefined) throw new InvalidArgument('--title is not allowed on memos')
+    if (patch.due !== undefined) throw new InvalidArgument('--due is not allowed on memos')
+    if (patch.start_at !== undefined) throw new InvalidArgument('--start is not allowed on memos')
+    if (patch.date !== undefined) throw new InvalidArgument('--date is not allowed on memos')
+    if (patch.note !== undefined && patch.note !== null) requireValidNote(patch.note)
+    if (patch.project !== undefined) requireListExists(s, patch.project)
+    const next: MemoItem = { ...item }
+    if (patch.note !== undefined) next.note = requireValidNote(patch.note ?? '')
+    if (patch.pinned !== undefined) next.pinned = patch.pinned
+    if (patch.project !== undefined) next.project = patch.project
+    return { store: replaceItem(s, next), entity: next }
   }
   if (patch.due !== undefined && item.type === 'waiting') {
     throw new InvalidArgument('--due is not allowed on waiting items')
@@ -397,6 +446,9 @@ export function setStatus(
   t: StatusTransition,
 ): { store: Store; entity: List | Item } {
   const e = requireEntity(s, id)
+  if (e.type === 'memo') {
+    throw new InvalidArgument(`${id} is a memo and has no status`)
+  }
   const closed_at = t.status === 'completed' || t.status === 'dropped' ? t.closed_at : null
 
   if (e.type === 'waiting') {
@@ -500,6 +552,15 @@ export function activeDeadlines(s: Store, today: string): DeadlineItem[] {
       i.type === 'deadline' &&
       i.status === 'active' &&
       i.date >= today &&
+      parentActive(s, i.project),
+  )
+}
+
+export function reviewDeadlines(s: Store): DeadlineItem[] {
+  return s.items.filter(
+    (i): i is DeadlineItem =>
+      i.type === 'deadline' &&
+      i.status === 'active' &&
       parentActive(s, i.project),
   )
 }

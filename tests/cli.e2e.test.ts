@@ -63,7 +63,16 @@ type Deadline = {
   closed_at: string | null
 }
 
-type Item = Action | Waiting | Deadline
+type Memo = {
+  id: string
+  type: 'memo'
+  note: string
+  pinned: boolean
+  project: string | null
+  created_at: string
+}
+
+type Item = Action | Waiting | Deadline | Memo
 
 type ListOutput = {
   active_actions: Action[]
@@ -105,7 +114,7 @@ function cli(...args: string[]) {
 }
 
 function addProject(title: string, opts: { note?: string; parent?: string } = {}): Project {
-  const args = ['add', 'project', '--title', title]
+  const args = ['add', 'project', title]
   if (opts.note !== undefined) args.push('--note', opts.note)
   if (opts.parent !== undefined) args.push('--parent', opts.parent)
   const r = cli(...args)
@@ -124,7 +133,7 @@ function addAction(
     note?: string
   } = {},
 ): Action {
-  const args = ['add', 'action', '--title', title]
+  const args = ['add', 'action', title]
   if (flags.active) args.push('--active')
   if (flags.deferred) args.push('--deferred')
   if (flags.project) args.push('--project', flags.project)
@@ -140,7 +149,7 @@ function addWaitingItem(
   title: string,
   flags: { project?: string; note?: string } = {},
 ): Waiting {
-  const args = ['add', 'waiting', '--title', title]
+  const args = ['add', 'waiting', title]
   if (flags.project) args.push('--project', flags.project)
   if (flags.note !== undefined) args.push('--note', flags.note)
   const r = cli(...args)
@@ -152,7 +161,7 @@ function addDeadlineItem(
   title: string,
   flags: { date: string; project?: string; note?: string },
 ): Deadline {
-  const args = ['add', 'deadline', '--title', title, '--date', flags.date]
+  const args = ['add', 'deadline', title, '--date', flags.date]
   if (flags.project) args.push('--project', flags.project)
   if (flags.note !== undefined) args.push('--note', flags.note)
   const r = cli(...args)
@@ -160,13 +169,25 @@ function addDeadlineItem(
   return parseJson<Deadline>(r.stdout)
 }
 
+function addMemoItem(
+  note: string,
+  flags: { pinned?: boolean; project?: string } = {},
+): Memo {
+  const args = ['add', 'memo', note]
+  if (flags.pinned) args.push('--pinned')
+  if (flags.project !== undefined) args.push('--project', flags.project)
+  const r = cli(...args)
+  assert.equal(r.code, 0, r.stderr)
+  return parseJson<Memo>(r.stdout)
+}
+
 // ---- Reads ----------------------------------------------------------
 
 describe('todo (bare dashboard)', () => {
-  it('returns the empty CONTEXT placeholder block on a fresh store', () => {
+  it('returns empty stdout on a fresh store', () => {
     const r = cli()
     assert.equal(r.code, 0, r.stderr)
-    assert.match(r.stdout, /^CONTEXT: \|\n  \(empty — agent: store/)
+    assert.equal(r.stdout, '')
   })
 
   it('includes active actions, waiting, deadlines, active projects as YAML-like blocks', () => {
@@ -204,6 +225,23 @@ describe('todo (bare dashboard)', () => {
     cli('complete', a.id)
     const r = cli()
     assert.doesNotMatch(r.stdout, /ACTIVE ACTIONS/)
+  })
+
+  it('renders pinned memos under KEEP IN MIND and omits the section when there are none', () => {
+    addMemoItem('Sam is in hospital', { pinned: true })
+    const withPinned = cli()
+    assert.equal(withPinned.code, 0, withPinned.stderr)
+    assert.match(withPinned.stdout, /^KEEP IN MIND \[1\]:$/m)
+    assert.ok(withPinned.stdout.includes('  note: "Sam is in hospital"'))
+
+    const cleanDataDir = makeTempDataDir()
+    try {
+      const withoutPinned = runCli([], { dataDir: cleanDataDir })
+      assert.equal(withoutPinned.code, 0, withoutPinned.stderr)
+      assert.doesNotMatch(withoutPinned.stdout, /^KEEP IN MIND/m)
+    } finally {
+      cleanup(cleanDataDir)
+    }
   })
 })
 
@@ -369,19 +407,19 @@ describe('todo add', () => {
   })
 
   it('errors when neither --active nor --deferred is given on action', () => {
-    const r = cli('add', 'action', '--title', 'X')
+    const r = cli('add', 'action', 'X')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /--active, --deferred, or --start is required/i)
   })
 
   it('errors when both --active and --deferred are given', () => {
-    const r = cli('add', 'action', '--title', 'X', '--active', '--deferred')
+    const r = cli('add', 'action', 'X', '--active', '--deferred')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /mutually exclusive/i)
   })
 
   it('errors on unknown --project', () => {
-    const r = cli('add', 'action', '--title', 'X', '--active', '--project', 'noSuchPr')
+    const r = cli('add', 'action', 'X', '--active', '--project', 'noSuchPr')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /unknown project/i)
   })
@@ -400,7 +438,7 @@ describe('todo add', () => {
   })
 
   it('rejects unparseable --due', () => {
-    const r = cli('add', 'action', '--title', 'X', '--active', '--due', 'asdfghjkl')
+    const r = cli('add', 'action', 'X', '--active', '--due', 'asdfghjkl')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /could not parse date/i)
   })
@@ -561,12 +599,13 @@ describe('todo projects add/edit', () => {
     assert.equal(p.closed_at, null)
   })
 
-  it('edits a project via polymorphic edit, clearing note with ""', () => {
+  it('edits a project title via polymorphic edit', () => {
     const p = addProject('X', { note: 'a' })
-    const r = cli('edit', p.id, '--note', '')
+    const r = cli('edit', p.id, '--title', 'Renamed')
     assert.equal(r.code, 0)
     const out = parseJson<Project>(r.stdout)
-    assert.equal(out.note, null)
+    assert.equal(out.title, 'Renamed')
+    assert.equal(out.note, 'a')
   })
 
   it('rejects --due / --project on a project edit', () => {
@@ -580,7 +619,7 @@ describe('todo projects add/edit', () => {
   })
 
   it('rejects empty title on add project', () => {
-    const r = cli('add', 'project', '--title', '   ')
+    const r = cli('add', 'project', '   ')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /title is required/i)
   })
@@ -709,13 +748,13 @@ describe('todo config', () => {
 })
 
 describe('first run', () => {
-  it('bare todo on a missing data dir returns the empty CONTEXT placeholder without creating the dir', () => {
+  it('bare todo on a missing data dir returns empty stdout without creating the dir', () => {
     const home = makeTempDir('todo-home-')
     const dir = join(makeTempDir('todo-data-parent-'), 'never-existed')
     try {
       const r = runCli([], { home, env: { TODO_DATA_DIR: dir } })
       assert.equal(r.code, 0, r.stderr)
-      assert.match(r.stdout, /^CONTEXT: \|\n  \(empty — agent: store/)
+      assert.equal(r.stdout, '')
       // Reading shouldn't have created the dir.
       assert.equal(existsSync(dir), false)
     } finally {
@@ -747,6 +786,8 @@ describe('help', () => {
     assert.match(out, /list/)
     assert.match(out, /show/)
     assert.match(out, /add/)
+    assert.match(out, /review/)
+    assert.doesNotMatch(out, /\bcontext\b/)
   })
 })
 
@@ -761,7 +802,7 @@ describe('start dates', () => {
     })
 
     it('rejects --active --start', () => {
-      const r = cli('add', 'action', '--title', 'X', '--active', '--start', futureDate(7))
+      const r = cli('add', 'action', 'X', '--active', '--start', futureDate(7))
       assert.equal(r.code, 1)
       assert.match(r.stderr, /--start cannot combine with --active/i)
     })
@@ -773,25 +814,25 @@ describe('start dates', () => {
     })
 
     it('rejects no flags at all', () => {
-      const r = cli('add', 'action', '--title', 'X')
+      const r = cli('add', 'action', 'X')
       assert.equal(r.code, 1)
       assert.match(r.stderr, /--active, --deferred, or --start is required/i)
     })
 
     it('rejects --deferred --start today', () => {
-      const r = cli('add', 'action', '--title', 'X', '--deferred', '--start', todayStr())
+      const r = cli('add', 'action', 'X', '--deferred', '--start', todayStr())
       assert.equal(r.code, 1)
       assert.match(r.stderr, /date must be in the future/i)
     })
 
     it('rejects --deferred --start <past>', () => {
-      const r = cli('add', 'action', '--title', 'X', '--deferred', '--start', pastDate(1))
+      const r = cli('add', 'action', 'X', '--deferred', '--start', pastDate(1))
       assert.equal(r.code, 1)
       assert.match(r.stderr, /date must be in the future/i)
     })
 
     it('rejects --deferred --start ""', () => {
-      const r = cli('add', 'action', '--title', 'X', '--deferred', '--start', '')
+      const r = cli('add', 'action', 'X', '--deferred', '--start', '')
       assert.equal(r.code, 1)
       assert.match(r.stderr, /--start cannot be empty/i)
     })
@@ -1037,31 +1078,31 @@ describe('todo add deadline', () => {
   })
 
   it('rejects past --date', () => {
-    const r = cli('add', 'deadline', '--title', 'past', '--date', PAST)
+    const r = cli('add', 'deadline', 'past', '--date', PAST)
     assert.equal(r.code, 1)
     assert.match(r.stderr, /date must be in the future/i)
   })
 
   it('rejects today as --date', () => {
-    const r = cli('add', 'deadline', '--title', 'today', '--date', 'today')
+    const r = cli('add', 'deadline', 'today', '--date', 'today')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /date must be in the future/i)
   })
 
   it('errors on unknown --project', () => {
-    const r = cli('add', 'deadline', '--title', 'x', '--date', FUTURE, '--project', 'noSuchPr')
+    const r = cli('add', 'deadline', 'x', '--date', FUTURE, '--project', 'noSuchPr')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /unknown project/i)
   })
 
   it('errors when --date is missing', () => {
-    const r = cli('add', 'deadline', '--title', 'x')
+    const r = cli('add', 'deadline', 'x')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /required option.*--date/i)
   })
 
   it('rejects empty title', () => {
-    const r = cli('add', 'deadline', '--title', '   ', '--date', FUTURE)
+    const r = cli('add', 'deadline', '   ', '--date', FUTURE)
     assert.equal(r.code, 1)
     assert.match(r.stderr, /title is required/i)
   })
@@ -1122,14 +1163,14 @@ describe('todo edit on deadlines', () => {
     assert.match(r.stderr, /--date.*not allowed.*project/i)
   })
 
-  it('updates title, note, project on a deadline', () => {
+  it('updates title and project on a deadline', () => {
     const proj = addProject('p')
     const d = addDeadlineItem('x', { date: FUTURE })
     const out = parseJson<Deadline>(
-      cli('edit', d.id, '--title', 'renamed', '--note', 'n', '--project', proj.id).stdout,
+      cli('edit', d.id, '--title', 'renamed', '--project', proj.id).stdout,
     )
     assert.equal(out.title, 'renamed')
-    assert.equal(out.note, 'n')
+    assert.equal(out.note, null)
     assert.equal(out.project, proj.id)
   })
 })
@@ -1226,7 +1267,7 @@ describe('todo sub-projects', () => {
   })
 
   it('add project --parent rejects an unknown parent id', () => {
-    const r = cli('add', 'project', '--title', 'Child', '--parent', 'nope1234')
+    const r = cli('add', 'project', 'Child', '--parent', 'nope1234')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /not found|unknown project/i)
   })
@@ -1234,14 +1275,14 @@ describe('todo sub-projects', () => {
   it('add project --parent rejects a child project (depth-1 limit)', () => {
     const root = addProject('Root')
     const child = addProject('Child', { parent: root.id })
-    const r = cli('add', 'project', '--title', 'Grandchild', '--parent', child.id)
+    const r = cli('add', 'project', 'Grandchild', '--parent', child.id)
     assert.equal(r.code, 1)
     assert.match(r.stderr, /must be a root/i)
   })
 
   it('add project --parent rejects a non-project id', () => {
     const a = addAction('A', { active: true })
-    const r = cli('add', 'project', '--title', 'P', '--parent', a.id)
+    const r = cli('add', 'project', 'P', '--parent', a.id)
     assert.equal(r.code, 1)
   })
 
@@ -1331,85 +1372,10 @@ describe('todo sub-projects', () => {
   })
 })
 
-// ---- todo context ---------------------------------------------------
-
-describe('todo context', () => {
-  type ContextResult = { context: string | null }
-
-  it('bare `todo context` on a fresh store emits the empty placeholder block', () => {
+describe('removed context command', () => {
+  it('rejects `todo context` as an unknown command', () => {
     const r = cli('context')
-    assert.equal(r.code, 0, r.stderr)
-    assert.match(r.stdout, /^CONTEXT: \|\n  \(empty — agent: store/)
-  })
-
-  it('`todo context "<text>"` sets the value and returns canonical JSON', () => {
-    const r = cli('context', 'heads-down on demo this week')
-    assert.equal(r.code, 0, r.stderr)
-    const out = parseJson<ContextResult>(r.stdout)
-    assert.equal(out.context, 'heads-down on demo this week')
-  })
-
-  it('a subsequent bare `todo context` emits the value as a YAML block scalar', () => {
-    cli('context', 'today: ship demo')
-    const r = cli('context')
-    assert.equal(r.code, 0, r.stderr)
-    assert.match(r.stdout, /^CONTEXT: \|\n  today: ship demo$/m)
-    assert.doesNotMatch(r.stdout, /\(empty —/)
-  })
-
-  it('`todo context ""` clears to null', () => {
-    cli('context', 'something')
-    const r = cli('context', '')
-    assert.equal(r.code, 0, r.stderr)
-    const out = parseJson<ContextResult>(r.stdout)
-    assert.equal(out.context, null)
-  })
-
-  it('`todo context --append "<text>"` joins with a blank line on existing', () => {
-    cli('context', 'first')
-    const r = cli('context', '--append', 'second')
-    assert.equal(r.code, 0, r.stderr)
-    const out = parseJson<ContextResult>(r.stdout)
-    assert.equal(out.context, 'first\n\nsecond')
-  })
-
-  it('`todo context --append "<text>"` sets when empty', () => {
-    const r = cli('context', '--append', 'kicking off')
-    assert.equal(r.code, 0, r.stderr)
-    const out = parseJson<ContextResult>(r.stdout)
-    assert.equal(out.context, 'kicking off')
-  })
-
-  it('rejects empty `--append`', () => {
-    const r = cli('context', '--append', '')
     assert.equal(r.code, 1)
-    assert.match(r.stderr, /empty/i)
-  })
-
-  it('rejects positional + --append used together', () => {
-    const r = cli('context', 'replace', '--append', 'extra')
-    assert.equal(r.code, 1)
-    assert.match(r.stderr, /mutually exclusive/i)
-  })
-
-  it('renders the set value at the top of the dashboard as a block scalar', () => {
-    cli('context', 'heads-down on demo')
-    addAction('do thing', { active: true })
-    const r = cli()
-    assert.equal(r.code, 0, r.stderr)
-    assert.match(r.stdout, /^CONTEXT: \|\n  heads-down on demo\n\nACTIVE ACTIONS/)
-  })
-
-  it('persists multi-line context verbatim through append cycles', () => {
-    cli('context', '--append', 'fact A')
-    cli('context', '--append', 'fact B')
-    const r = cli()
-    assert.match(r.stdout, /^CONTEXT: \|\n  fact A\n  \n  fact B/)
-  })
-
-  it('persists meta.context to disk under the meta namespace', () => {
-    cli('context', 'persisted')
-    const store = readJson<{ meta: { context: string | null } }>(join(dataDir, 'store.json'))
-    assert.equal(store.meta.context, 'persisted')
+    assert.match((r.stdout + r.stderr).toLowerCase(), /unknown command|error: too many arguments/)
   })
 })

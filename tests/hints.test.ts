@@ -185,10 +185,11 @@ describe('deferredCount', () => {
 
 describe('renderHints', () => {
   it('returns empty string when no triggers fire', () => {
-    assert.equal(renderHints(EMPTY_STORE, TODAY), '')
+    assert.equal(renderHints(EMPTY_STORE, TODAY, 'dashboard'), '')
+    assert.equal(renderHints(EMPTY_STORE, TODAY, 'review'), '')
   })
 
-  it('orders triggers: lapsed → stalled → stale → deferred-count', () => {
+  it('orders dashboard triggers: lapsed → stalled → stale → deferred-count', () => {
     let s: Store = EMPTY_STORE
     // Lapsed deadline (recent)
     s = addDeadline(s, { id: 'D1', created_at: T0, title: 'Tax day', date: '2026-04-23' }).store
@@ -204,7 +205,7 @@ describe('renderHints', () => {
     // Deferred count
     s = addAction(s, { id: 'A1', created_at: T0, title: 'someday', status: 'deferred' }).store
 
-    const out = renderHints(s, TODAY)
+    const out = renderHints(s, TODAY, 'dashboard')
     const lines = out.trim().split('\n')
     assert.equal(lines.length, 4)
     assert.ok(lines[0].includes('"Tax day"') && lines[0].includes('deadline passed'))
@@ -212,5 +213,26 @@ describe('renderHints', () => {
     assert.ok(lines[2].includes('"Cover art"') && lines[2].includes('waiting 12 days'))
     assert.ok(lines[3].includes('1 deferred item hidden'))
     assert.ok(out.endsWith('\n'))
+  })
+
+  it('omits the deferred-count hint on review while keeping the actionable hints', () => {
+    let s: Store = EMPTY_STORE
+    s = addDeadline(s, { id: 'D1', created_at: T0, title: 'Tax day', date: '2026-04-23' }).store
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'Telepath' }).store
+    s = addWaiting(s, {
+      id: 'W1',
+      created_at: '2026-04-15T10:00:00Z',
+      title: 'Cover art',
+      project: 'P1',
+    }).store
+    s = addAction(s, { id: 'A1', created_at: T0, title: 'someday', status: 'deferred' }).store
+
+    const out = renderHints(s, TODAY, 'review')
+    const lines = out.trim().split('\n')
+    assert.equal(lines.length, 3)
+    assert.ok(lines[0].includes('"Tax day"') && lines[0].includes('deadline passed'))
+    assert.ok(lines[1].includes('"Telepath"') && lines[1].includes('no active actions'))
+    assert.ok(lines[2].includes('"Cover art"') && lines[2].includes('waiting 12 days'))
+    assert.ok(!out.includes('deferred item hidden'))
   })
 })

@@ -6,8 +6,8 @@ import {
   addProjectCmd,
   addWaitingCmd,
 } from './commands/add.js'
+import { addMemoCmd } from './commands/addMemo.js'
 import { configCmd } from './commands/config.js'
-import { contextCmd } from './commands/context.js'
 import { editCmd } from './commands/edit.js'
 import {
   activateCmd,
@@ -17,6 +17,7 @@ import {
 } from './commands/lifecycle.js'
 import { dashboardCmd } from './commands/dashboard.js'
 import { listCmd } from './commands/list.js'
+import { reviewCmd } from './commands/review.js'
 import { showCmd } from './commands/show.js'
 import { DoError } from './core/errors.js'
 
@@ -40,6 +41,7 @@ program
       'Run with no command to see the dashboard (active items + Hints).',
   )
   .helpOption('-h, --help', 'show help')
+  .allowExcessArguments(false)
   .action(() => {
     run(() => dashboardCmd())
   })
@@ -48,15 +50,22 @@ program
   .command('list <type>')
   .description(
     'List every item of a given type, regardless of status ' +
-      '(actions, projects, deadlines, waiting). Includes completed/dropped/past-date.',
+      '(actions, projects, deadlines, waiting, memo). Includes completed/dropped/past-date.',
   )
   .action((type: string) => {
     run(() => listCmd(type))
   })
 
 program
+  .command('review')
+  .description('Weekly sweep: memos, live and deferred work, deadlines, projects, and actionable hints')
+  .action(() => {
+    run(() => reviewCmd())
+  })
+
+program
   .command('show <id>')
-  .description('Show a single entity (project, action, or waiting) by id')
+  .description('Show a single entity (project, action, waiting, deadline, or memo) by id')
   .action((id: string) => {
     run(() => showCmd(id))
   })
@@ -64,19 +73,17 @@ program
 const add = program.command('add').description('Create a new entity')
 
 add
-  .command('project')
+  .command('project <title>')
   .description('Create a project')
-  .requiredOption('--title <text>', 'title')
   .option('--note <text>', 'attach a note')
   .option('--parent <id>', 'attach to a root project as a sub-project (depth strictly 1)')
-  .action((opts: { title: string; note?: string; parent?: string }) => {
-    run(() => addProjectCmd(opts))
+  .action((title: string, opts: { note?: string; parent?: string }) => {
+    run(() => addProjectCmd({ title, ...opts }))
   })
 
 add
-  .command('action')
+  .command('action <title>')
   .description('Create an action item')
-  .requiredOption('--title <text>', 'title')
   .option('--active', 'next action')
   .option('--deferred', 'someday/maybe')
   .option('--project <id>', 'parent project id')
@@ -84,8 +91,7 @@ add
   .option('--start <date>', 'start date — schedule action to auto-revive (implies --deferred if no mode flag)')
   .option('--note <text>', 'attach a note')
   .action(
-    (opts: {
-      title: string
+    (title: string, opts: {
       active?: boolean
       deferred?: boolean
       project?: string
@@ -93,41 +99,50 @@ add
       start?: string
       note?: string
     }) => {
-      run(() => addActionCmd(opts))
+      run(() => addActionCmd({ title, ...opts }))
     },
   )
 
 add
-  .command('waiting')
+  .command('waiting <title>')
   .description('Create a waiting item')
-  .requiredOption('--title <text>', 'title')
   .option('--project <id>', 'parent project id')
   .option('--note <text>', 'attach a note')
-  .action((opts: { title: string; project?: string; note?: string }) => {
-    run(() => addWaitingCmd(opts))
+  .action((title: string, opts: { project?: string; note?: string }) => {
+    run(() => addWaitingCmd({ title, ...opts }))
   })
 
 add
-  .command('deadline')
+  .command('deadline <title>')
   .description('Create a deadline (date marker; not a task)')
-  .requiredOption('--title <text>', 'title')
   .requiredOption('--date <date>', 'deadline date (YYYY-MM-DD or natural language; must be future)')
   .option('--project <id>', 'parent project id')
   .option('--note <text>', 'attach a note')
-  .action((opts: { title: string; date: string; project?: string; note?: string }) => {
-    run(() => addDeadlineCmd(opts))
+  .action((title: string, opts: { date: string; project?: string; note?: string }) => {
+    run(() => addDeadlineCmd({ title, ...opts }))
+  })
+
+add
+  .command('memo <note>')
+  .description('Create a memo')
+  .option('--pinned', 'show on the daily dashboard')
+  .option('--project <id>', 'parent project id')
+  .action((note: string, opts: { pinned?: boolean; project?: string }) => {
+    run(() => addMemoCmd({ note, ...opts }))
   })
 
 program
   .command('edit <id>')
-  .description('Edit any entity (project, action, waiting, or deadline)')
+  .description('Edit any entity (project, action, waiting, deadline, or memo)')
   .option('--active', 'set status=active')
   .option('--deferred', 'set status=deferred')
   .option('--completed', 'set status=completed')
   .option('--dropped', 'set status=dropped')
   .option('--start <date>', "start date (action only); '' clears; with future date implies --deferred")
   .option('--title <text>', 'new title')
-  .option('--note <text>', "note text; '' clears")
+  .option('--note <text>', 'memo body (memos only)')
+  .option('--pinned', 'pin memo (memos only)')
+  .option('--no-pinned', 'unpin memo (memos only)')
   .option('--note-append <text>', 'append text to the existing note (joins with a blank line)')
   .option('--due <date>', "due date; '' clears (action only)")
   .option('--project <id>', "parent project id; '' detaches (item only)")
@@ -141,6 +156,7 @@ program
         deferred?: boolean
         completed?: boolean
         dropped?: boolean
+        pinned?: boolean
         start?: string
         title?: string
         note?: string
@@ -182,19 +198,6 @@ program
   .description('status=dropped; closed_at=now')
   .action((id: string) => {
     run(() => dropCmd(id))
-  })
-
-program
-  .command('context [text]')
-  .description(
-    'Read or write the store-level context (user goals, priorities, focus, ' +
-      "or pointers to relevant docs). Always rendered at the top of the dashboard. " +
-      'Bare `context` reads. `context \"<text>\"` replaces (\'\' clears). ' +
-      '`context --append \"<text>\"` appends, joined with a blank line.',
-  )
-  .option('--append <text>', 'append to existing context (joins with a blank line)')
-  .action((text: string | undefined, opts: { append?: string }) => {
-    run(() => contextCmd(text, opts))
   })
 
 program

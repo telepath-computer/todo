@@ -22,6 +22,7 @@ export type EditCmdOpts = {
   deferred?: boolean
   completed?: boolean
   dropped?: boolean
+  pinned?: boolean
   start?: string
   title?: string
   note?: string
@@ -43,6 +44,28 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
   }
 
   const wantStatus = resolveWantStatus(opts)
+
+  if (entity.type === 'memo') {
+    if (wantStatus !== null) throw new InvalidArgument(`${id} is a memo and has no status`)
+    if (opts.start !== undefined) throw new InvalidArgument('--start is not allowed on memos')
+    if (opts.due !== undefined) throw new InvalidArgument('--due is not allowed on memos')
+    if (opts.date !== undefined) throw new InvalidArgument('--date is not allowed on memos')
+    if (opts.parent !== undefined) throw new InvalidArgument('--parent is not allowed on memos')
+    if (opts.title !== undefined) throw new InvalidArgument('--title is not allowed on memos')
+    if (opts.noteAppend !== undefined) throw new InvalidArgument('--note-append is not allowed on memos')
+
+    const patch: EditItemPatch = {}
+    if (opts.note !== undefined) patch.note = opts.note
+    if (opts.pinned !== undefined) patch.pinned = opts.pinned
+    if (opts.project !== undefined) patch.project = opts.project === '' ? null : opts.project
+
+    const result = editItem(store, id, patch)
+    writeStore(dataDir, result.store)
+    return json(result.entity)
+  }
+
+  if (opts.note !== undefined) throw new InvalidArgument('--note is only allowed on memos')
+  if (opts.pinned !== undefined) throw new InvalidArgument('--pinned is only allowed on memos')
 
   if (entity.type === 'project') {
     if (opts.start !== undefined) throw new InvalidArgument('--start is not allowed on projects')
@@ -119,7 +142,6 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
 
   const hasFieldEdits =
     opts.title !== undefined ||
-    opts.note !== undefined ||
     opts.due !== undefined ||
     opts.project !== undefined ||
     opts.parent !== undefined ||
@@ -130,7 +152,6 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
     if (entity.type === 'project') {
       const patch: EditListPatch = {}
       if (opts.title !== undefined) patch.title = opts.title
-      if (opts.note !== undefined) patch.note = opts.note === '' ? null : opts.note
       if (opts.parent !== undefined) patch.parent = opts.parent === '' ? null : opts.parent
       const result = editList(nextStore, id, patch)
       nextStore = result.store
@@ -138,7 +159,6 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
     } else {
       const patch: EditItemPatch = {}
       if (opts.title !== undefined) patch.title = opts.title
-      if (opts.note !== undefined) patch.note = opts.note === '' ? null : opts.note
       if (opts.due !== undefined) patch.due = opts.due === '' ? null : resolveDueInput(opts.due)
       if (opts.project !== undefined) patch.project = opts.project === '' ? null : opts.project
       if (startClearOnly) patch.start_at = null

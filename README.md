@@ -7,7 +7,7 @@ Humans can read it too. Stable nanoid refs throughout.
 
 ## What it does
 
-Four things go in your todo, in GTD shorthand:
+Five things go in your todo, in GTD shorthand:
 
 - **Projects** — outcomes that take more than one action. Anything you're
   engaged with: "Telepath", "House move", "Q3 launch". Park them when life
@@ -23,18 +23,23 @@ Four things go in your todo, in GTD shorthand:
   "tax filing day". They show on the dashboard until the date passes, then
   silently disappear. You can `drop` one if it's cancelled, but you can't
   "complete" it — a deadline is a fact about time.
+- **Memos** — free-standing notes and facts worth keeping around:
+  "Sam is in hospital", "ask about budget cap", "printer model is HP 4101".
+  Pin the ones you want on every daily dashboard; the full set resurfaces on
+  `todo review`.
 
 Tasks (actions, projects) finish one of two ways: **completed** (done) or
 **dropped** (not happening). For projects and actions you can flip them
 between active and deferred too. Deadlines only `drop` (and `activate`
 un-drops); the date passing is what retires them.
 
-The dashboard (`todo` with no subcommand) shows what's *live*: active
-actions, waiting items, upcoming deadlines, active projects — plus a
-`HINTS:` section flagging stuff the dashboard would otherwise hide
-(recent lapsed deadlines, stalled projects, stale waiting, deferred
-queue size). Terminal items, dropped deadlines, and past-date deadlines
-stay out of the way; reach them with `todo list <type>`.
+The dashboard (`todo` with no subcommand) shows what's *live*: pinned
+memos under `KEEP IN MIND`, active actions, waiting items, upcoming
+deadlines, active projects — plus a `HINTS:` section flagging stuff the
+dashboard would otherwise hide (recent lapsed deadlines, stalled
+projects, stale waiting, deferred queue size). Terminal items, dropped
+deadlines, past-date deadlines, and unpinned memos stay out of the way;
+reach them with `todo list <type>` or `todo review`.
 
 ## Install
 
@@ -48,7 +53,7 @@ The binary is `todo`. `todo --help` lists every command;
 ## Example
 
 ```sh
-$ todo add project --title "Telepath" --note "Indie thinking tool"
+$ todo add project "Telepath" --note "Indie thinking tool"
 {
   "closed_at": null,
   "created_at": "2026-04-27T11:10:00Z",
@@ -59,7 +64,7 @@ $ todo add project --title "Telepath" --note "Indie thinking tool"
   "type": "project"
 }
 
-$ todo add action --title "Find guests for E14" --active --project Vh8XLm2k --due tomorrow
+$ todo add action "Find guests for E14" --active --project Vh8XLm2k --due tomorrow
 {
   "closed_at": null,
   "created_at": "2026-04-27T11:11:00Z",
@@ -73,14 +78,21 @@ $ todo add action --title "Find guests for E14" --active --project Vh8XLm2k --du
   "type": "action"
 }
 
-$ todo add action --title "Renew domain" --deferred --start "next monday"
+$ todo add action "Renew domain" --deferred --start "next monday"
 # scheduled — hidden from the dashboard until that day, then auto-shows
 
-$ todo add waiting --title "Cover art from designer" --project Vh8XLm2k
+$ todo add waiting "Cover art from designer" --project Vh8XLm2k
 
-$ todo add deadline --title "Q3 launch" --date "next quarter end" --project Vh8XLm2k
+$ todo add deadline "Q3 launch" --date "next quarter end" --project Vh8XLm2k
+
+$ todo add memo "Sam is in hospital" --pinned
 
 $ todo
+KEEP IN MIND [1]:
+
+- id: a1b2C3d4
+  note: "Sam is in hospital"
+
 ACTIVE ACTIONS [1]:
 
 - id: K3jLm9pQ
@@ -97,6 +109,13 @@ WAITING [1]:
 
 DEADLINES [1]:
 ... etc.
+
+$ todo review
+MEMOS [1]:
+
+- id: a1b2C3d4
+  note: "Sam is in hospital"
+  pinned: true
 
 $ todo complete K3jLm9pQ          # done
 $ todo activate K3jLm9pQ          # changed your mind: bring it back live

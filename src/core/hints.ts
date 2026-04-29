@@ -62,12 +62,12 @@ export function deferredCount(s: Store, today: string): string[] {
 
 // Composer ------------------------------------------------------------
 
-export function renderHints(s: Store, today: string): string {
+export function renderHints(s: Store, today: string, mode: 'dashboard' | 'review'): string {
   const sections = [
     recentLapsedDeadlines(s, today),
     stalledActiveProjects(s, today),
     staleWaiting(s, today),
-    deferredCount(s, today),
+    mode === 'dashboard' ? deferredCount(s, today) : [],
   ]
   const all = sections.flat()
   if (all.length === 0) return ''
@@ -91,6 +91,7 @@ function countProjectChildren(
   let hasAnyChildren = false
   for (const i of s.items) {
     if (i.project !== projectId) continue
+    if (i.type === 'memo') continue
     if (isTerminal(i.status)) continue
     hasAnyChildren = true
     if (i.type === 'action') {
@@ -113,4 +114,3 @@ function countProjectChildren(
 function isTerminal(status: string): boolean {
   return status === 'completed' || status === 'dropped'
 }
-

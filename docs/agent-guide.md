@@ -9,14 +9,15 @@ gets.
 ## Recommended system-prompt snippet
 
 > You have a `todo` CLI for managing the user's GTD-style projects,
-> actions, waiting items, and deadlines. Run `todo` (with no arguments) to
-> see the current dashboard — that's the place to orient yourself before
-> deciding what to do next.
+> actions, waiting items, deadlines, and memos. Run `todo` (with no
+> arguments) to see the current dashboard — that's the place to orient
+> yourself before deciding what to do next.
 >
-> The dashboard prints `SECTION [N]:` headings (active actions, waiting,
-> deadlines, active projects) followed by per-item blocks of `- key: value`
-> lines. Live items only — anything deferred, completed, dropped, or
-> past-date is hidden by design.
+> The dashboard prints `SECTION [N]:` headings (`KEEP IN MIND`, active
+> actions, waiting, deadlines, active projects) followed by per-item
+> blocks of `- key: value` lines. Live items only — anything deferred,
+> completed, dropped, or past-date is hidden by design. `KEEP IN MIND`
+> is pinned memos only.
 >
 > If the dashboard ends with a `HINTS:` section, treat each bullet as
 > something to weigh into the conversation:
@@ -31,15 +32,22 @@ gets.
 >   when relevant.
 > - **Stale waiting.** A waiting item more than a week old. Worth a
 >   poke; the person you're waiting on may have ghosted you.
-> - **Long-tail deferred count.** Just a calibration line. Don't surface
->   unless asked or in review mode.
+> - **Long-tail deferred count.** Just a calibration line. It only appears
+>   on the daily dashboard, not on `todo review`.
 >
 > To enumerate everything (including completed/dropped/past-date) for a
 > given type, use `todo list actions` / `todo list projects` /
-> `todo list deadlines` / `todo list waiting`. To drill into one entity,
-> `todo show <id>` — for projects this also shows their children grouped
-> by `ACTIVE ACTIONS`, `DEFERRED ACTIONS`, `WAITING`, `DEADLINES`.
-> `todo show` does not surface Hints; that's a dashboard-only signal.
+> `todo list deadlines` / `todo list waiting` / `todo list memo`. To
+> drill into one entity, `todo show <id>` — for projects this also shows
+> their children grouped by `ACTIVE ACTIONS`, `DEFERRED ACTIONS`,
+> `WAITING`, `DEADLINES`. `todo show` does not surface Hints; those are
+> read-surface signals (`todo` / `todo review`), not entity-scoped.
+>
+> Use `todo review` for the broader weekly sweep. It includes all memos
+> (pinned and unpinned), deferred actions, deferred projects, active
+> lapsed deadlines, and the actionable hints. The deferred-count hint is
+> intentionally omitted there because the deferred sections are already
+> visible.
 >
 > Mutation commands (`todo add`, `todo edit`, `todo activate`, `todo defer`,
 > `todo complete`, `todo drop`) return canonical entity JSON — useful for
@@ -58,6 +66,8 @@ gets.
 - **Status is implicit on the dashboard** (the bucket already says it).
   In `todo list <type>` output, every block carries a `status:` field
   because the listing mixes statuses.
+- **Memos have no status.** They can be pinned, edited, shown, listed,
+  reviewed, and dropped, but not activated/deferred/completed.
 - **Deadlines are not tasks.** No `complete`. They lapse on their date.
   Drop one if it's cancelled.
 - **Scheduled actions auto-revive.** A deferred action with `start_at`
