@@ -416,6 +416,24 @@ describe('todo edit <id>', () => {
     assert.equal(out.due, null)
   })
 
+  it('clears a due date with --due "" and persists across reads', () => {
+    const a = addAction('Email Steve', { active: true, due: '2026-05-03' })
+    assert.equal(a.due, '2026-05-03')
+
+    const cleared = parseJson<Action>(cli('edit', a.id, '--due', '').stdout)
+    assert.equal(cleared.due, null)
+    assert.equal(cleared.title, 'Email Steve')
+    assert.equal(cleared.status, 'active')
+
+    const show = cli('show', a.id)
+    assert.equal(show.code, 0, show.stderr)
+    assert.doesNotMatch(show.stdout, /^due:/m)
+
+    const list = cli('list', 'actions')
+    assert.ok(list.stdout.includes(`id: ${a.id}`))
+    assert.ok(!list.stdout.includes('  due:'))
+  })
+
   it('detaches from project with --project ""', () => {
     const proj = addProject('P')
     const a = addAction('x', { active: true, project: proj.id })
