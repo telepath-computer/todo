@@ -1,5 +1,9 @@
 # Plan: top-level context
 
+> **Superseded by [`remember-and-review.md`](./remember-and-review.md).**
+> The singleton `meta.context` field shipped in v0.9.0 is being
+> replaced by a `memo` item type; `todo context` is removed.
+
 ## Goal
 
 A store-level singleton `context` field that always renders at the top of

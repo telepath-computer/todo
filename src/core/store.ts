@@ -2,7 +2,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'node:path'
 import { customAlphabet } from 'nanoid'
 import { DoError } from './errors.js'
-import type { ActionItem, Item, MemoItem, ProjectList, Store } from './model.js'
+import type { ActionItem, Item, ProjectList, Store } from './model.js'
 import { EMPTY_STORE } from './model.js'
 
 const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -24,9 +24,9 @@ export function readStore(dataDir: string): Store {
   const path = storePath(dataDir)
   if (!existsSync(path)) return EMPTY_STORE
   const raw = readFileSync(path, 'utf8')
-  let parsed: Store & { meta?: { context?: string | null } }
+  let parsed: Store
   try {
-    parsed = JSON.parse(raw) as Store & { meta?: { context?: string | null } }
+    parsed = JSON.parse(raw) as Store
   } catch (err) {
     throw new DoError(`malformed store.json at ${path}: ${(err as Error).message}`)
   }
@@ -36,21 +36,11 @@ export function readStore(dataDir: string): Store {
 // Forward-compat normalisation: stores written by older versions may be
 // missing fields introduced later. Fill defaults so the rest of the code
 // can treat the schema as strict.
-function normalizeStore(s: Store & { meta?: { context?: string | null } }): Store {
+function normalizeStore(s: Store): Store {
   const items = s.items.map((i): Item => {
     if (i.type === 'action') {
       const raw = i as ActionItem & { start_at?: string | null }
       if (raw.start_at === undefined) return { ...raw, start_at: null }
-    }
-    if (i.type === 'memo') {
-      const raw = i as MemoItem & { pinned?: boolean; project?: string | null }
-      if (raw.pinned === undefined || raw.project === undefined) {
-        return {
-          ...raw,
-          pinned: raw.pinned ?? false,
-          project: raw.project ?? null,
-        }
-      }
     }
     return i
   })
@@ -61,17 +51,6 @@ function normalizeStore(s: Store & { meta?: { context?: string | null } }): Stor
     }
     return l
   })
-  const context = typeof s.meta?.context === 'string' ? s.meta.context : null
-  if (context !== null && context.trim().length > 0) {
-    items.push({
-      id: newId(),
-      type: 'memo',
-      note: context,
-      pinned: true,
-      project: null,
-      created_at: nowIso(),
-    })
-  }
   return { lists, items }
 }
 

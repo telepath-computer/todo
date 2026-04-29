@@ -140,7 +140,7 @@ program
   .option('--dropped', 'set status=dropped')
   .option('--start <date>', "start date (action only); '' clears; with future date implies --deferred")
   .option('--title <text>', 'new title')
-  .option('--note <text>', 'memo body (memos only)')
+  .option('--note <text>', "note text; '' clears")
   .option('--pinned', 'pin memo (memos only)')
   .option('--no-pinned', 'unpin memo (memos only)')
   .option('--note-append <text>', 'append text to the existing note (joins with a blank line)')
