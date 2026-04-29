@@ -131,14 +131,17 @@ function seed(): Store {
 // ---- Dashboard ------------------------------------------------------
 
 describe('renderDashboard', () => {
-  it('renders empty store as empty string', () => {
-    assert.equal(renderDashboard(EMPTY_STORE, TODAY), '')
+  it('renders empty store with only the empty CONTEXT placeholder block', () => {
+    const out = renderDashboard(EMPTY_STORE, TODAY)
+    assert.match(out, /^CONTEXT: \|\n  \(empty — agent: store/)
+    assert.ok(!out.includes('ACTIVE ACTIONS'))
+    assert.ok(!out.includes('WAITING'))
   })
 
-  it('renders all four buckets in canonical order without status (status implicit)', () => {
+  it('renders all four buckets in canonical order without status, prepended with empty CONTEXT block', () => {
     const s = seed()
     const out = renderDashboard(s, TODAY)
-    const expected = [
+    const after = [
       'ACTIVE ACTIONS [2]:',
       '',
       '- id: A1',
@@ -173,17 +176,33 @@ describe('renderDashboard', () => {
       '  deadlines: 1',
       '  note: "Indie thinking tool"',
     ].join('\n')
-    assert.equal(out, expected)
+    assert.match(out, /^CONTEXT: \|\n  \(empty — agent: store/)
+    assert.ok(out.endsWith(after), `expected dashboard to end with seed sections, got tail: ${out.slice(-200)}`)
   })
 
-  it('omits empty buckets entirely', () => {
+  it('omits empty buckets entirely (CONTEXT placeholder still shown)', () => {
     let s: Store = EMPTY_STORE
     s = addAction(s, { id: 'A1', created_at: T0, title: 'Just an action', status: 'active' }).store
     const out = renderDashboard(s, TODAY)
+    assert.match(out, /^CONTEXT: \|/m)
     assert.ok(out.includes('ACTIVE ACTIONS'))
     assert.ok(!out.includes('WAITING'))
     assert.ok(!out.includes('DEADLINES'))
     assert.ok(!out.includes('ACTIVE PROJECTS'))
+  })
+
+  it('renders set context as a YAML block scalar at the top', () => {
+    const s: Store = { ...EMPTY_STORE, meta: { context: 'heads-down on demo' } }
+    const out = renderDashboard(s, TODAY)
+    assert.ok(out.startsWith('CONTEXT: |\n  heads-down on demo'), out)
+    assert.ok(!out.includes('(empty — agent:'), out)
+  })
+
+  it('renders multi-line context as a block scalar with each line indented 2 spaces', () => {
+    const body = 'today: ship demo prep\nthis week: heads-down\nsee Notes/Q3.md'
+    const s: Store = { ...EMPTY_STORE, meta: { context: body } }
+    const out = renderDashboard(s, TODAY)
+    assert.ok(out.startsWith('CONTEXT: |\n  today: ship demo prep\n  this week: heads-down\n  see Notes/Q3.md'), out)
   })
 
   it('appends Hints section when provided', () => {

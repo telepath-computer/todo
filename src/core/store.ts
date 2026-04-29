@@ -51,7 +51,9 @@ function normalizeStore(s: Store): Store {
     }
     return l
   })
-  return { ...s, items, lists }
+  const rawMeta = (s as Store & { meta?: Partial<Store['meta']> }).meta
+  const meta = { context: rawMeta?.context ?? null }
+  return { ...s, items, lists, meta }
 }
 
 export function writeStore(dataDir: string, store: Store): void {

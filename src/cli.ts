@@ -7,6 +7,7 @@ import {
   addWaitingCmd,
 } from './commands/add.js'
 import { configCmd } from './commands/config.js'
+import { contextCmd } from './commands/context.js'
 import { editCmd } from './commands/edit.js'
 import {
   activateCmd,
@@ -181,6 +182,19 @@ program
   .description('status=dropped; closed_at=now')
   .action((id: string) => {
     run(() => dropCmd(id))
+  })
+
+program
+  .command('context [text]')
+  .description(
+    'Read or write the store-level context (user goals, priorities, focus, ' +
+      "or pointers to relevant docs). Always rendered at the top of the dashboard. " +
+      'Bare `context` reads. `context \"<text>\"` replaces (\'\' clears). ' +
+      '`context --append \"<text>\"` appends, joined with a blank line.',
+  )
+  .option('--append <text>', 'append to existing context (joins with a blank line)')
+  .action((text: string | undefined, opts: { append?: string }) => {
+    run(() => contextCmd(text, opts))
   })
 
 program

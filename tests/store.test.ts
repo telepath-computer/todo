@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { DoError } from '../src/core/errors.js'
-import { addProject, type Store } from '../src/core/model.js'
+import { EMPTY_STORE, addProject, type Store } from '../src/core/model.js'
 import { newId, nowIso, readStore, stableStringify, writeStore } from '../src/core/store.js'
 import { cleanup, makeTempDataDir } from './helpers.js'
 
@@ -52,7 +52,7 @@ describe('readStore / writeStore', () => {
     const dir = makeTempDataDir()
     try {
       const s = readStore(dir)
-      assert.deepEqual(s, { lists: [], items: [] })
+      assert.deepEqual(s, EMPTY_STORE)
     } finally {
       cleanup(dir)
     }
@@ -62,7 +62,7 @@ describe('readStore / writeStore', () => {
     const dir = makeTempDataDir()
     try {
       const ts = nowIso()
-      const seeded = addProject({ lists: [], items: [] }, {
+      const seeded = addProject(EMPTY_STORE, {
         id: newId(),
         created_at: ts,
         title: 'Sample',
@@ -107,8 +107,8 @@ describe('readStore / writeStore', () => {
   it('overwrites atomically (no .tmp leftover)', () => {
     const dir = makeTempDataDir()
     try {
-      writeStore(dir, { lists: [], items: [] })
-      writeStore(dir, { lists: [], items: [] })
+      writeStore(dir, EMPTY_STORE)
+      writeStore(dir, EMPTY_STORE)
       const entries = readdirSync(dir)
       assert.deepEqual(entries.filter((e) => e.startsWith('store.json.tmp')), [])
       assert.deepEqual(entries.sort(), ['store.json'])
@@ -121,9 +121,9 @@ describe('readStore / writeStore', () => {
     const parent = makeTempDataDir()
     try {
       const dir = join(parent, 'nested', 'data')
-      writeStore(dir, { lists: [], items: [] })
+      writeStore(dir, EMPTY_STORE)
       const back = readStore(dir)
-      assert.deepEqual(back, { lists: [], items: [] })
+      assert.deepEqual(back, EMPTY_STORE)
     } finally {
       cleanup(parent)
     }
@@ -201,6 +201,36 @@ describe('readStore / writeStore', () => {
       assert.equal(project.type, 'project')
       assert.equal('parent' in project, true)
       assert.equal(project.parent, null)
+    } finally {
+      cleanup(dir)
+    }
+  })
+
+  it('normalizes a pre-meta store (no meta key) to meta: { context: null }', () => {
+    const dir = makeTempDataDir()
+    try {
+      mkdirSync(dir, { recursive: true })
+      const raw = JSON.stringify(EMPTY_STORE)
+      writeFileSync(join(dir, 'store.json'), raw)
+      const back = readStore(dir)
+      assert.deepEqual(back.meta, { context: null })
+    } finally {
+      cleanup(dir)
+    }
+  })
+
+  it('preserves existing meta.context on read', () => {
+    const dir = makeTempDataDir()
+    try {
+      mkdirSync(dir, { recursive: true })
+      const raw = JSON.stringify({
+        meta: { context: 'heads-down on demo' },
+        lists: [],
+        items: [],
+      })
+      writeFileSync(join(dir, 'store.json'), raw)
+      const back = readStore(dir)
+      assert.equal(back.meta.context, 'heads-down on demo')
     } finally {
       cleanup(dir)
     }

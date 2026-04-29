@@ -163,10 +163,10 @@ function addDeadlineItem(
 // ---- Reads ----------------------------------------------------------
 
 describe('todo (bare dashboard)', () => {
-  it('returns empty output on a fresh store', () => {
+  it('returns the empty CONTEXT placeholder block on a fresh store', () => {
     const r = cli()
     assert.equal(r.code, 0, r.stderr)
-    assert.equal(r.stdout, '')
+    assert.match(r.stdout, /^CONTEXT: \|\n  \(empty — agent: store/)
   })
 
   it('includes active actions, waiting, deadlines, active projects as YAML-like blocks', () => {
@@ -709,13 +709,13 @@ describe('todo config', () => {
 })
 
 describe('first run', () => {
-  it('bare todo returns empty output without ever needing the data dir on disk', () => {
+  it('bare todo on a missing data dir returns the empty CONTEXT placeholder without creating the dir', () => {
     const home = makeTempDir('todo-home-')
     const dir = join(makeTempDir('todo-data-parent-'), 'never-existed')
     try {
       const r = runCli([], { home, env: { TODO_DATA_DIR: dir } })
       assert.equal(r.code, 0, r.stderr)
-      assert.equal(r.stdout, '')
+      assert.match(r.stdout, /^CONTEXT: \|\n  \(empty — agent: store/)
       // Reading shouldn't have created the dir.
       assert.equal(existsSync(dir), false)
     } finally {
@@ -1328,5 +1328,88 @@ describe('todo sub-projects', () => {
     assert.equal(r.code, 0, r.stderr)
     assert.match(r.stdout, /^PROJECTS \[2\]:$/m)
     assert.ok(r.stdout.includes(`  parent: Root [${root.id}]`))
+  })
+})
+
+// ---- todo context ---------------------------------------------------
+
+describe('todo context', () => {
+  type ContextResult = { context: string | null }
+
+  it('bare `todo context` on a fresh store emits the empty placeholder block', () => {
+    const r = cli('context')
+    assert.equal(r.code, 0, r.stderr)
+    assert.match(r.stdout, /^CONTEXT: \|\n  \(empty — agent: store/)
+  })
+
+  it('`todo context "<text>"` sets the value and returns canonical JSON', () => {
+    const r = cli('context', 'heads-down on demo this week')
+    assert.equal(r.code, 0, r.stderr)
+    const out = parseJson<ContextResult>(r.stdout)
+    assert.equal(out.context, 'heads-down on demo this week')
+  })
+
+  it('a subsequent bare `todo context` emits the value as a YAML block scalar', () => {
+    cli('context', 'today: ship demo')
+    const r = cli('context')
+    assert.equal(r.code, 0, r.stderr)
+    assert.match(r.stdout, /^CONTEXT: \|\n  today: ship demo$/m)
+    assert.doesNotMatch(r.stdout, /\(empty —/)
+  })
+
+  it('`todo context ""` clears to null', () => {
+    cli('context', 'something')
+    const r = cli('context', '')
+    assert.equal(r.code, 0, r.stderr)
+    const out = parseJson<ContextResult>(r.stdout)
+    assert.equal(out.context, null)
+  })
+
+  it('`todo context --append "<text>"` joins with a blank line on existing', () => {
+    cli('context', 'first')
+    const r = cli('context', '--append', 'second')
+    assert.equal(r.code, 0, r.stderr)
+    const out = parseJson<ContextResult>(r.stdout)
+    assert.equal(out.context, 'first\n\nsecond')
+  })
+
+  it('`todo context --append "<text>"` sets when empty', () => {
+    const r = cli('context', '--append', 'kicking off')
+    assert.equal(r.code, 0, r.stderr)
+    const out = parseJson<ContextResult>(r.stdout)
+    assert.equal(out.context, 'kicking off')
+  })
+
+  it('rejects empty `--append`', () => {
+    const r = cli('context', '--append', '')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /empty/i)
+  })
+
+  it('rejects positional + --append used together', () => {
+    const r = cli('context', 'replace', '--append', 'extra')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /mutually exclusive/i)
+  })
+
+  it('renders the set value at the top of the dashboard as a block scalar', () => {
+    cli('context', 'heads-down on demo')
+    addAction('do thing', { active: true })
+    const r = cli()
+    assert.equal(r.code, 0, r.stderr)
+    assert.match(r.stdout, /^CONTEXT: \|\n  heads-down on demo\n\nACTIVE ACTIONS/)
+  })
+
+  it('persists multi-line context verbatim through append cycles', () => {
+    cli('context', '--append', 'fact A')
+    cli('context', '--append', 'fact B')
+    const r = cli()
+    assert.match(r.stdout, /^CONTEXT: \|\n  fact A\n  \n  fact B/)
+  })
+
+  it('persists meta.context to disk under the meta namespace', () => {
+    cli('context', 'persisted')
+    const store = readJson<{ meta: { context: string | null } }>(join(dataDir, 'store.json'))
+    assert.equal(store.meta.context, 'persisted')
   })
 })

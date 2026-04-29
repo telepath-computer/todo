@@ -10,6 +10,7 @@ import {
   addProject,
   addWaiting,
   appendNote,
+  appendStoreContext,
   deferredActions,
   deferredProjects,
   editItem,
@@ -23,6 +24,7 @@ import {
   liveWaiting,
   resolveRef,
   setStatus,
+  setStoreContext,
   type ActionItem,
   type DeadlineItem,
   type ProjectList,
@@ -831,5 +833,64 @@ describe('sub-projects', () => {
     s = addProject(s, { id: 'C', created_at: T0, title: 'Child', parent: 'R' }).store
     s = setStatus(s, 'R', { status: 'dropped', closed_at: T0 }).store
     assert.deepEqual(activeProjects(s).map((p) => p.id), [])
+  })
+})
+
+// Top-level context --------------------------------------------------
+
+describe('store-level context', () => {
+  it('EMPTY_STORE has meta.context = null', () => {
+    assert.equal(EMPTY_STORE.meta.context, null)
+  })
+
+  it('setStoreContext replaces with body', () => {
+    const next = setStoreContext(EMPTY_STORE, 'heads-down')
+    assert.equal(next.meta.context, 'heads-down')
+  })
+
+  it('setStoreContext clears with null', () => {
+    const set = setStoreContext(EMPTY_STORE, 'foo')
+    const cleared = setStoreContext(set, null)
+    assert.equal(cleared.meta.context, null)
+  })
+
+  it('setStoreContext treats empty string as null (clear)', () => {
+    const set = setStoreContext(EMPTY_STORE, 'foo')
+    const cleared = setStoreContext(set, '')
+    assert.equal(cleared.meta.context, null)
+  })
+
+  it('appendStoreContext sets when null', () => {
+    const next = appendStoreContext(EMPTY_STORE, 'first')
+    assert.equal(next.meta.context, 'first')
+  })
+
+  it('appendStoreContext joins with a blank line when set', () => {
+    let s = setStoreContext(EMPTY_STORE, 'first')
+    s = appendStoreContext(s, 'second')
+    assert.equal(s.meta.context, 'first\n\nsecond')
+  })
+
+  it('appendStoreContext rejects empty / whitespace body', () => {
+    assert.throws(() => appendStoreContext(EMPTY_STORE, ''), InvalidArgument)
+    assert.throws(() => appendStoreContext(EMPTY_STORE, '   '), InvalidArgument)
+  })
+
+  it('does not mutate the input store', () => {
+    const before = EMPTY_STORE
+    setStoreContext(before, 'x')
+    assert.equal(before.meta.context, null)
+    const set = setStoreContext(EMPTY_STORE, 'a')
+    appendStoreContext(set, 'b')
+    assert.equal(set.meta.context, 'a')
+  })
+
+  it('preserves lists and items unchanged', () => {
+    let s = setStoreContext(EMPTY_STORE, 'ctx')
+    s = addProject(s, { id: 'P', created_at: T0, title: 'P' }).store
+    assert.equal(s.meta.context, 'ctx')
+    assert.equal(s.lists.length, 1)
+    s = appendStoreContext(s, 'more')
+    assert.equal(s.lists.length, 1)
   })
 })

@@ -260,8 +260,23 @@ function section(heading: string, count: number, blocks: string[]): string {
 
 // Top-level renderers ------------------------------------------------
 
+const EMPTY_CONTEXT_PLACEHOLDER =
+  "(empty — agent: store the user's current goals, priorities, focus, or pointers to relevant docs here. Not actions, deadlines, or projects; those have their own commands.)"
+
+// Always-emitted YAML `|`-block scalar for the store's `meta.context`.
+// Used both as the dashboard preamble and as the response to bare
+// `todo context`. Always block-scalar (even single-line, even null) so
+// the parser shape stays predictable regardless of body content.
+export function renderContextBlock(s: Store): string {
+  const body = s.meta.context ?? EMPTY_CONTEXT_PLACEHOLDER
+  const indented = body.split('\n').map((l) => `  ${l}`).join('\n')
+  return `CONTEXT: |\n${indented}`
+}
+
 export function renderDashboard(s: Store, today: string, hints?: string): string {
   const sections: string[] = []
+
+  sections.push(renderContextBlock(s))
 
   const aa = liveActions(s, today)
   sections.push(

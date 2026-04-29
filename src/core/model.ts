@@ -53,12 +53,17 @@ export type DeadlineItem = BaseItem & {
 
 export type Item = ActionItem | WaitingItem | DeadlineItem
 
+export type StoreMeta = {
+  context: string | null
+}
+
 export type Store = {
+  meta: StoreMeta
   lists: List[]
   items: Item[]
 }
 
-export const EMPTY_STORE: Store = { lists: [], items: [] }
+export const EMPTY_STORE: Store = { meta: { context: null }, lists: [], items: [] }
 
 const TERMINAL_STATUSES: ReadonlySet<Status> = new Set(['completed', 'dropped'])
 
@@ -234,6 +239,21 @@ export function addDeadline(s: Store, input: AddDeadlineInput): { store: Store; 
     closed_at: null,
   }
   return { store: { ...s, items: [...s.items, entity] }, entity }
+}
+
+// Top-level context ----------------------------------------------------
+
+export function setStoreContext(s: Store, body: string | null): Store {
+  const next = body === null || body === '' ? null : body
+  return { ...s, meta: { ...s.meta, context: next } }
+}
+
+export function appendStoreContext(s: Store, body: string): Store {
+  if (body.trim().length === 0) {
+    throw new InvalidArgument('body is required and cannot be empty')
+  }
+  const next = s.meta.context === null ? body : `${s.meta.context}\n\n${body}`
+  return { ...s, meta: { ...s.meta, context: next } }
 }
 
 // Note append ----------------------------------------------------------
