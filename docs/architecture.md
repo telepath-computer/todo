@@ -39,7 +39,7 @@ src/
     ├── hints.ts           Hint trigger functions (lapsed deadlines, stalled projects, stale waiting, deferred count) + mode-aware renderHints composer
     ├── model.ts           types, mutators, memo helpers, bucket helpers, resolveRef, lookups
     ├── render.ts          narrative formatting: dayDelta, modifiers, item lines, memo blocks, dashboard, review, list, show
-    └── store.ts           store.json I/O, atomic write, nanoid, sorted-key stringify, one-shot legacy context→memo migration
+    └── store.ts           store.json I/O, atomic write, nanoid, sorted-key stringify, forward-compat normalization
 ```
 
 ### Layer rules
@@ -48,11 +48,10 @@ src/
   tmpfile + rename + fsync. Reads return `EMPTY_STORE` if the file is missing.
   Catches `JSON.parse` and rethrows as `DoError("malformed store.json at …")`
   so the CLI surfaces a clean message instead of a stack trace. `readStore`
-  also normalises forward-compatibility fields — actions written by older
-  versions get any missing fields (e.g. `start_at`) defaulted to `null` on
-  read, so the rest of the code can treat the schema as strict. The one
-  legacy migration is `meta.context`: on read, a non-empty value becomes a
-  pinned memo and the field is dropped from the normalized store.
+  also normalises forward-compatibility fields — older actions and memos get
+  any missing `start_at` defaulted to `null` on read, and legacy memo
+  `pinned` fields are stripped so the rest of the code can treat the schema
+  as strict.
 - **`model.ts`** is pure. No I/O, no `Date.now()`, no `process.env`. Mutators
   take the current `Store` and an input that includes any non-deterministic
   values (`id`, `created_at`, `ts`); they return `{ store, entity }`.
@@ -60,18 +59,20 @@ src/
   exactly the data it needs (`closed_at` for terminal, `start_at` for
   deferred). Validators throw typed errors. Bucket helpers (`liveActions`,
   `deferredActions`, `liveWaiting`, `activeProjects`, `deferredProjects`,
-  `activeDeadlines`, `reviewDeadlines`, `allMemos`, `pinnedMemos`) implement
-  filter rules including parent-state cascade and the past-due-scheduled
-  bridge: a deferred action with `start_at <= today` shows up in
-  `liveActions` and is excluded from `deferredActions`. Memos are items too,
-  but they deliberately have no status; `setStatus` rejects memo ids and
-  `drop` hard-deletes them.
+  `activeDeadlines`, `reviewDeadlines`, `allMemos`, `availableMemos`,
+  `deferredMemos`) implement filter rules including parent-state cascade and
+  the past-due-scheduled bridge: a deferred action with `start_at <= today`
+  shows up in `liveActions` and is excluded from `deferredActions`. Memo
+  visibility is driven only by the memo's own `start_at`; project status does
+  not suppress it. Memos are items too, but they deliberately have no status;
+  `setStatus` rejects memo ids and `drop` hard-deletes them.
   `activeDeadlines` and the action helpers all take a `today: string`
   (YYYY-MM-DD) parameter so the model stays free of `Date.now()`;
   `commands/list.ts` computes today via `todayLocal()`.
 - **`dates.ts`** parses `--due`/`--start`/`--date` inputs (chrono + ISO
-  passthrough) and exposes `todayLocal()` and `requireFutureDate()` for the
-  strictly-future invariant on `start_at` and deadline `date`.
+  passthrough). Actions and deadlines use `requireFutureDate()` for their
+  strictly-future invariant; memos reuse the same parser via `resolveDueInput`
+  without the future-only restriction.
 - **`config.ts`** is the gate for data-dir paths. Both `writeConfig` and
   `resolveDataDir` reject non-absolute paths via a shared `requireAbsolute`
   check. `TODO_DATA_DIR=relative/foo` fails fast on resolve.

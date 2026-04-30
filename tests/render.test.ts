@@ -188,23 +188,47 @@ describe('renderDashboard', () => {
     assert.ok(!out.includes('ACTIVE PROJECTS'))
   })
 
-  it('renders pinned memos under KEEP IN MIND before the live buckets', () => {
+  it('renders available memos under KEEP IN MIND after ACTIVE PROJECTS and before HINTS', () => {
     let s = seed()
     s = addMemo(s, {
       id: 'M1',
       created_at: '2026-04-28T10:00:00Z',
       note: 'Sam is in hospital',
-      pinned: true,
     }).store
-    const out = renderDashboard(s, TODAY)
-    assert.ok(out.startsWith('KEEP IN MIND [1]:\n\n- id: M1\n  note: "Sam is in hospital"'), out)
-    assert.ok(!out.includes('pinned:'), out)
-    assert.match(out, /\n\nACTIVE ACTIONS \[2\]:/)
+    const out = renderDashboard(s, TODAY, '- a hint\n')
+    assert.match(out, /ACTIVE PROJECTS \[1\]:[\s\S]*KEEP IN MIND \[1\]:[\s\S]*HINTS:/)
+    assert.ok(out.includes('- id: M1\n  note: "Sam is in hospital"'), out)
   })
 
-  it('omits KEEP IN MIND when there are no pinned memos', () => {
+  it('KEEP IN MIND only includes available memos, even if their project is deferred', () => {
     let s: Store = EMPTY_STORE
-    s = addMemo(s, { id: 'M1', created_at: T0, note: 'fact', pinned: false }).store
+    s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
+    s = addMemo(s, {
+      id: 'M1',
+      created_at: T0,
+      note: 'available on a deferred project',
+      start_at: TODAY,
+      project: 'P1',
+    }).store
+    s = addMemo(s, {
+      id: 'M2',
+      created_at: '2026-04-28T10:00:00Z',
+      note: 'future memo',
+      start_at: '2026-05-04',
+    }).store
+    s = setStatus(s, 'P1', { status: 'deferred', start_at: null }).store
+
+    const out = renderDashboard(s, TODAY)
+    assert.match(out, /^KEEP IN MIND \[1\]:$/m)
+    assert.ok(out.includes('- id: M1'))
+    assert.ok(out.includes('  start_at: 2026-04-27'))
+    assert.ok(!out.includes('(starts 2026-04-27,'), out)
+    assert.ok(!out.includes('- id: M2'))
+  })
+
+  it('omits KEEP IN MIND when there are no available memos', () => {
+    let s: Store = EMPTY_STORE
+    s = addMemo(s, { id: 'M1', created_at: T0, note: 'fact', start_at: '2026-05-04' }).store
     assert.doesNotMatch(renderDashboard(s, TODAY), /^KEEP IN MIND/m)
   })
 
@@ -281,27 +305,25 @@ describe('renderList', () => {
     assert.equal(renderList(EMPTY_STORE, TODAY, 'actions'), 'ACTIONS [0]:')
   })
 
-  it('renders memos pinned-first with full multi-line notes', () => {
+  it('renders memos newest-first with full multi-line notes and deferred start hints', () => {
     let s: Store = EMPTY_STORE
     s = addMemo(s, {
       id: 'M1',
       created_at: '2026-04-27T10:00:00Z',
       note: 'line one\nline two',
-      pinned: false,
     }).store
     s = addMemo(s, {
       id: 'M2',
       created_at: '2026-04-28T10:00:00Z',
-      note: 'pinned first',
-      pinned: true,
+      note: 'future memo',
+      start_at: '2026-05-04',
     }).store
     const out = renderList(s, TODAY, 'memos')
     assert.ok(out.startsWith('MEMOS [2]:'))
-    assert.match(out, /- id: M2[\s\S]+pinned: true[\s\S]+- id: M1/)
+    assert.match(out, /- id: M2[\s\S]+start_at: 2026-05-04 \(starts 2026-05-04, in 7 days\)[\s\S]+- id: M1/)
     assert.ok(out.includes('  note: |'))
     assert.ok(out.includes('    line one'))
     assert.ok(out.includes('    line two'))
-    assert.ok(out.includes('  pinned: false'))
   })
 })
 
@@ -385,7 +407,7 @@ describe('renderShow non-projects', () => {
       id: 'M1',
       created_at: T0,
       note: 'remember this\nwith two lines',
-      pinned: true,
+      start_at: '2026-05-04',
     }).store
     const memo = s.items[0]
     const expected = [
@@ -393,7 +415,7 @@ describe('renderShow non-projects', () => {
       '  note: |',
       '    remember this',
       '    with two lines',
-      '  pinned: true',
+      '  start_at: 2026-05-04 (starts 2026-05-04, in 7 days)',
     ].join('\n')
     assert.equal(renderShow(s, TODAY, memo), expected)
   })
@@ -466,12 +488,12 @@ describe('renderReview', () => {
     s = addProject(s, { id: 'P1', created_at: T0, title: 'Telepath' }).store
     s = addProject(s, { id: 'P2', created_at: T0, title: 'Later' }).store
     s = setStatus(s, 'P2', { status: 'deferred', start_at: null }).store
-    s = addMemo(s, { id: 'M1', created_at: '2026-04-27T10:00:00Z', note: 'older unpinned' }).store
+    s = addMemo(s, { id: 'M1', created_at: '2026-04-27T10:00:00Z', note: 'older available' }).store
     s = addMemo(s, {
       id: 'M2',
       created_at: '2026-04-28T10:00:00Z',
-      note: 'newer pinned',
-      pinned: true,
+      note: 'newer deferred',
+      start_at: '2026-05-04',
     }).store
     s = addAction(s, { id: 'A1', created_at: T0, title: 'next', status: 'active', project: 'P1' }).store
     s = addAction(s, { id: 'A2', created_at: T0, title: 'later', status: 'deferred' }).store
@@ -483,7 +505,7 @@ describe('renderReview', () => {
       out,
       /^MEMOS \[2\]:[\s\S]*ACTIVE ACTIONS \[1\]:[\s\S]*DEFERRED ACTIONS \[1\]:[\s\S]*WAITING \[1\]:[\s\S]*DEADLINES \[1\]:[\s\S]*ACTIVE PROJECTS \[1\]:[\s\S]*DEFERRED PROJECTS \[1\]:[\s\S]*HINTS:/,
     )
-    assert.match(out, /- id: M2[\s\S]+pinned: true[\s\S]+- id: M1/)
+    assert.match(out, /- id: M2[\s\S]+start_at: 2026-05-04 \(starts 2026-05-04, in 7 days\)[\s\S]+- id: M1/)
     assert.ok(out.includes('  date: 2026-04-20 (passed 7 days ago)'))
     assert.ok(out.endsWith('HINTS:\n\n- stale waiting'))
   })

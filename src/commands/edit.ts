@@ -22,7 +22,6 @@ export type EditCmdOpts = {
   deferred?: boolean
   completed?: boolean
   dropped?: boolean
-  pinned?: boolean
   start?: string
   title?: string
   note?: string
@@ -47,7 +46,6 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
 
   if (entity.type === 'memo') {
     if (wantStatus !== null) throw new InvalidArgument(`${id} is a memo and has no status`)
-    if (opts.start !== undefined) throw new InvalidArgument('--start is not allowed on memos')
     if (opts.due !== undefined) throw new InvalidArgument('--due is not allowed on memos')
     if (opts.date !== undefined) throw new InvalidArgument('--date is not allowed on memos')
     if (opts.parent !== undefined) throw new InvalidArgument('--parent is not allowed on memos')
@@ -56,7 +54,7 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
 
     const patch: EditItemPatch = {}
     if (opts.note !== undefined) patch.note = opts.note
-    if (opts.pinned !== undefined) patch.pinned = opts.pinned
+    if (opts.start !== undefined) patch.start_at = opts.start === '' ? null : resolveDueInput(opts.start)
     if (opts.project !== undefined) patch.project = opts.project === '' ? null : opts.project
 
     const result = editItem(store, id, patch)
@@ -65,7 +63,6 @@ export function editCmd(id: string, opts: EditCmdOpts): string {
   }
 
   if (opts.note !== undefined) throw new InvalidArgument('--note is only allowed on memos')
-  if (opts.pinned !== undefined) throw new InvalidArgument('--pinned is only allowed on memos')
 
   if (entity.type === 'project') {
     if (opts.start !== undefined) throw new InvalidArgument('--start is not allowed on projects')

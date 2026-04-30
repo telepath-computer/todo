@@ -2,7 +2,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'node:path'
 import { customAlphabet } from 'nanoid'
 import { DoError } from './errors.js'
-import type { ActionItem, Item, ProjectList, Store } from './model.js'
+import type { ActionItem, Item, MemoItem, ProjectList, Store } from './model.js'
 import { EMPTY_STORE } from './model.js'
 
 const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -41,6 +41,17 @@ function normalizeStore(s: Store): Store {
     if (i.type === 'action') {
       const raw = i as ActionItem & { start_at?: string | null }
       if (raw.start_at === undefined) return { ...raw, start_at: null }
+    }
+    if (i.type === 'memo') {
+      const raw = i as MemoItem & { start_at?: string | null; pinned?: boolean }
+      return {
+        id: raw.id,
+        type: 'memo',
+        note: raw.note,
+        start_at: raw.start_at ?? null,
+        project: raw.project ?? null,
+        created_at: raw.created_at,
+      }
     }
     return i
   })

@@ -31,7 +31,7 @@ type Memo = {
   id: string
   type: 'memo'
   note: string
-  pinned: boolean
+  start_at: string | null
   project: string | null
   created_at: string
 }
@@ -91,9 +91,9 @@ function addDeadline(title: string, date: string): Deadline {
   return parseJson<Deadline>(r.stdout)
 }
 
-function addMemo(note: string, flags: { pinned?: boolean; project?: string } = {}): Memo {
+function addMemo(note: string, flags: { start?: string; project?: string } = {}): Memo {
   const args = ['add', 'memo', note]
-  if (flags.pinned) args.push('--pinned')
+  if (flags.start !== undefined) args.push('--start', flags.start)
   if (flags.project !== undefined) args.push('--project', flags.project)
   const r = cli(...args)
   assert.equal(r.code, 0, r.stderr)
@@ -101,19 +101,36 @@ function addMemo(note: string, flags: { pinned?: boolean; project?: string } = {
 }
 
 describe('todo add memo', () => {
-  it('creates an unpinned memo by default', () => {
+  it('creates an always-available memo by default', () => {
     const memo = addMemo('Sam is in hospital')
     assert.equal(memo.type, 'memo')
     assert.equal(memo.note, 'Sam is in hospital')
-    assert.equal(memo.pinned, false)
+    assert.equal(memo.start_at, null)
     assert.equal(memo.project, null)
   })
 
-  it('creates a pinned project memo', () => {
+  it('round-trips --start through the store', () => {
+    const memo = addMemo('Future fact', { start: '2026-05-12' })
+    assert.equal(memo.start_at, '2026-05-12')
+
+    const store = readJson<{
+      items: Array<Record<string, unknown>>
+    }>(join(dataDir, 'store.json'))
+    const stored = store.items.find((item) => item.id === memo.id)
+    assert.equal(stored?.start_at, '2026-05-12')
+  })
+
+  it('creates a future-start project memo', () => {
     const project = addProject('Telepath')
-    const memo = addMemo('Keep this in view', { pinned: true, project: project.id })
-    assert.equal(memo.pinned, true)
+    const memo = addMemo('Keep this in view', { start: futureDate(7), project: project.id })
+    assert.equal(memo.start_at, futureDate(7))
     assert.equal(memo.project, project.id)
+  })
+
+  it('rejects --pinned', () => {
+    const r = cli('add', 'memo', 'old habit', '--pinned')
+    assert.equal(r.code, 1)
+    assert.match(r.stderr, /unknown option '--pinned'/i)
   })
 
   it('requires the memo body positional', () => {
@@ -124,43 +141,49 @@ describe('todo add memo', () => {
 })
 
 describe('memo CRUD', () => {
-  it('list memo renders pinned-first with full multi-line bodies', () => {
+  it('list memo renders newest-first with full multi-line bodies and deferred start hints', () => {
     addMemo('line one\nline two')
-    const pinned = addMemo('pinned first', { pinned: true })
+    const future = addMemo('future memo', { start: futureDate(7) })
     const r = cli('list', 'memo')
     assert.equal(r.code, 0, r.stderr)
     assert.match(r.stdout, /^MEMOS \[2\]:$/m)
-    assert.match(r.stdout, new RegExp(`- id: ${pinned.id}[\\s\\S]+note: "pinned first"[\\s\\S]+pinned: true`))
+    assert.match(
+      r.stdout,
+      new RegExp(`- id: ${future.id}[\\s\\S]+note: "future memo"[\\s\\S]+start_at: ${futureDate(7)} \\(starts ${futureDate(7)}, in 7 days\\)`),
+    )
     assert.ok(r.stdout.includes('  note: |\n    line one\n    line two'))
-    assert.ok(r.stdout.includes('  pinned: false'))
+    assert.ok(!r.stdout.includes('pinned:'))
   })
 
   it('show renders a single memo block without a type header', () => {
-    const memo = addMemo('remember this\nwith two lines', { pinned: true })
+    const memo = addMemo('remember this\nwith two lines', { start: futureDate(7) })
     const r = cli('show', memo.id)
     assert.equal(r.code, 0, r.stderr)
     assert.ok(r.stdout.startsWith(`- id: ${memo.id}\n`), r.stdout)
     assert.ok(!r.stdout.startsWith('MEMO:'), r.stdout)
     assert.ok(r.stdout.includes('  note: |\n    remember this\n    with two lines'), r.stdout)
-    assert.ok(r.stdout.includes('  pinned: true'), r.stdout)
+    assert.ok(
+      r.stdout.includes(`  start_at: ${futureDate(7)} (starts ${futureDate(7)}, in 7 days)`),
+      r.stdout,
+    )
   })
 
-  it('edit updates note, pinned state, and project', () => {
+  it('edit updates note, start date, and project', () => {
     const project = addProject('Telepath')
     const memo = addMemo('old note')
-    const r = cli('edit', memo.id, '--note', 'new note', '--pinned', '--project', project.id)
+    const r = cli('edit', memo.id, '--note', 'new note', '--start', futureDate(10), '--project', project.id)
     assert.equal(r.code, 0, r.stderr)
     const out = parseJson<Memo>(r.stdout)
     assert.equal(out.note, 'new note')
-    assert.equal(out.pinned, true)
+    assert.equal(out.start_at, futureDate(10))
     assert.equal(out.project, project.id)
   })
 
-  it('edit supports --no-pinned and rejects empty notes', () => {
-    const memo = addMemo('old note', { pinned: true })
-    let r = cli('edit', memo.id, '--no-pinned')
+  it('edit supports clearing --start and rejects empty notes', () => {
+    const memo = addMemo('old note', { start: futureDate(7) })
+    let r = cli('edit', memo.id, '--start', '')
     assert.equal(r.code, 0, r.stderr)
-    assert.equal(parseJson<Memo>(r.stdout).pinned, false)
+    assert.equal(parseJson<Memo>(r.stdout).start_at, null)
 
     r = cli('edit', memo.id, '--note', '')
     assert.equal(r.code, 1)
@@ -172,14 +195,10 @@ describe('memo CRUD', () => {
     let r = cli('edit', action.id, '--note', 'replacement')
     assert.equal(r.code, 1)
     assert.match(r.stderr, /--note is only allowed on memos/i)
-
-    r = cli('edit', action.id, '--pinned')
-    assert.equal(r.code, 1)
-    assert.match(r.stderr, /--pinned is only allowed on memos/i)
   })
 
   it('drop hard-deletes memos and returns the last memo JSON', () => {
-    const memo = addMemo('remove me', { pinned: true })
+    const memo = addMemo('remove me', { start: futureDate(7) })
     const dropped = cli('drop', memo.id)
     assert.equal(dropped.code, 0, dropped.stderr)
     assert.deepEqual(parseJson<Memo>(dropped.stdout), memo)
@@ -191,6 +210,43 @@ describe('memo CRUD', () => {
     r = cli('edit', memo.id, '--note', 'new')
     assert.equal(r.code, 1)
     assert.match(r.stderr, new RegExp(`not found: ${memo.id}`))
+  })
+})
+
+describe('memo forward compatibility', () => {
+  it('loads an old pinned memo cleanly and drops pinned on save', () => {
+    writeFileSync(
+      join(dataDir, 'store.json'),
+      JSON.stringify({
+        lists: [],
+        items: [
+          {
+            id: 'M1',
+            type: 'memo',
+            note: 'old shape',
+            pinned: true,
+            project: null,
+            created_at: '2026-04-27T10:00:00Z',
+          },
+        ],
+      }, null, 2) + '\n',
+    )
+
+    let r = cli('show', 'M1')
+    assert.equal(r.code, 0, r.stderr)
+    assert.ok(r.stdout.includes('- id: M1'))
+    assert.ok(!r.stdout.includes('pinned:'), r.stdout)
+
+    r = cli('edit', 'M1', '--note', 'updated note')
+    assert.equal(r.code, 0, r.stderr)
+    assert.equal(parseJson<Memo>(r.stdout).start_at, null)
+
+    const store = readJson<{
+      items: Array<Record<string, unknown>>
+    }>(join(dataDir, 'store.json'))
+    const memo = store.items.find((item) => item.id === 'M1')
+    assert.equal(memo?.pinned, undefined)
+    assert.equal(memo?.start_at, null)
   })
 })
 
@@ -216,8 +272,8 @@ describe('todo review', () => {
     const deferredProject = addProject('Later')
     cli('defer', deferredProject.id)
 
-    addMemo('newest pinned', { pinned: true, project: activeProject.id })
-    addMemo('older unpinned')
+    addMemo('newer deferred', { start: futureDate(5), project: activeProject.id })
+    addMemo('older available')
     addAction('next action', { active: true })
     addAction('someday', { deferred: true })
     const staleWaiting = cli('add', 'waiting', 'reply from Sam')
@@ -246,8 +302,8 @@ describe('todo review', () => {
       r.stdout,
       /^MEMOS \[2\]:[\s\S]*ACTIVE ACTIONS \[1\]:[\s\S]*DEFERRED ACTIONS \[1\]:[\s\S]*WAITING \[1\]:[\s\S]*DEADLINES \[1\]:[\s\S]*ACTIVE PROJECTS \[1\]:[\s\S]*DEFERRED PROJECTS \[1\]:[\s\S]*HINTS:/,
     )
-    assert.ok(r.stdout.includes('pinned: true'))
-    assert.ok(r.stdout.includes('pinned: false'))
+    assert.ok(r.stdout.includes(`start_at: ${futureDate(5)} (starts ${futureDate(5)}, in 5 days)`))
+    assert.ok(!r.stdout.includes('pinned:'))
     assert.ok(r.stdout.includes(`date: ${pastDate(3)}`))
     assert.ok(r.stdout.includes('deadline passed'))
     assert.ok(r.stdout.includes('waiting'))

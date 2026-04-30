@@ -67,7 +67,7 @@ type Memo = {
   id: string
   type: 'memo'
   note: string
-  pinned: boolean
+  start_at: string | null
   project: string | null
   created_at: string
 }
@@ -171,10 +171,10 @@ function addDeadlineItem(
 
 function addMemoItem(
   note: string,
-  flags: { pinned?: boolean; project?: string } = {},
+  flags: { start?: string; project?: string } = {},
 ): Memo {
   const args = ['add', 'memo', note]
-  if (flags.pinned) args.push('--pinned')
+  if (flags.start !== undefined) args.push('--start', flags.start)
   if (flags.project !== undefined) args.push('--project', flags.project)
   const r = cli(...args)
   assert.equal(r.code, 0, r.stderr)
@@ -227,15 +227,19 @@ describe('todo (bare dashboard)', () => {
     assert.doesNotMatch(r.stdout, /ACTIVE ACTIONS/)
   })
 
-  it('renders pinned memos under KEEP IN MIND and omits the section when there are none', () => {
-    addMemoItem('Sam is in hospital', { pinned: true })
+  it('renders available memos under KEEP IN MIND and omits the section when there are none', () => {
+    addMemoItem('Sam is in hospital')
+    addMemoItem('future memo', { start: futureDate(7) })
     const withPinned = cli()
     assert.equal(withPinned.code, 0, withPinned.stderr)
     assert.match(withPinned.stdout, /^KEEP IN MIND \[1\]:$/m)
     assert.ok(withPinned.stdout.includes('  note: "Sam is in hospital"'))
+    assert.ok(!withPinned.stdout.includes('future memo'))
 
     const cleanDataDir = makeTempDataDir()
     try {
+      const added = runCli(['add', 'memo', 'future only', '--start', futureDate(7)], { dataDir: cleanDataDir })
+      assert.equal(added.code, 0, added.stderr)
       const withoutPinned = runCli([], { dataDir: cleanDataDir })
       assert.equal(withoutPinned.code, 0, withoutPinned.stderr)
       assert.doesNotMatch(withoutPinned.stdout, /^KEEP IN MIND/m)

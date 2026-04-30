@@ -13,11 +13,11 @@ gets.
 > arguments) to see the current dashboard — that's the place to orient
 > yourself before deciding what to do next.
 >
-> The dashboard prints `SECTION [N]:` headings (`KEEP IN MIND`, active
-> actions, waiting, deadlines, active projects) followed by per-item
-> blocks of `- key: value` lines. Live items only — anything deferred,
-> completed, dropped, or past-date is hidden by design. `KEEP IN MIND`
-> is pinned memos only.
+> The dashboard prints `SECTION [N]:` headings (`ACTIVE ACTIONS`,
+> `WAITING`, `DEADLINES`, `ACTIVE PROJECTS`, `KEEP IN MIND`) followed by
+> per-item blocks of `- key: value` lines. Live items only — anything
+> deferred, completed, dropped, or past-date is hidden by design.
+> `KEEP IN MIND` is memos whose `start_at` is null or already reached.
 >
 > If the dashboard ends with a `HINTS:` section, treat each bullet as
 > something to weigh into the conversation:
@@ -44,10 +44,10 @@ gets.
 > read-surface signals (`todo` / `todo review`), not entity-scoped.
 >
 > Use `todo review` for the broader weekly sweep. It includes all memos
-> (pinned and unpinned), deferred actions, deferred projects, active
-> lapsed deadlines, and the actionable hints. The deferred-count hint is
-> intentionally omitted there because the deferred sections are already
-> visible.
+> (available and deferred), deferred actions, deferred projects, active
+> lapsed deadlines, and the actionable hints. Deferred memos carry a
+> `start_at` hint there. The deferred-count hint is intentionally omitted
+> because the deferred sections are already visible.
 >
 > Mutation commands (`todo add`, `todo edit`, `todo activate`, `todo defer`,
 > `todo complete`, `todo drop`) return canonical entity JSON — useful for
@@ -61,12 +61,14 @@ gets.
   Stable, grep-friendly, safe to embed in conversation.
 - **Dates are local-tz `YYYY-MM-DD`.** Relative phrasing on date fields
   (`due: 2026-04-28 (tomorrow)`, `date: 2026-09-30 (in 156 days)`,
-  `start: 2026-05-04 (revives in 7 days)`) is computed by the CLI.
+  `start: 2026-05-04 (revives in 7 days)`,
+  `start_at: 2026-05-12 (starts 2026-05-12, in 5 days)`) is computed by
+  the CLI.
   Don't recompute.
 - **Status is implicit on the dashboard** (the bucket already says it).
   In `todo list <type>` output, every block carries a `status:` field
   because the listing mixes statuses.
-- **Memos have no status.** They can be pinned, edited, shown, listed,
+- **Memos have no status.** They can be dated, edited, shown, listed,
   reviewed, and dropped, but not activated/deferred/completed.
 - **Deadlines are not tasks.** No `complete`. They lapse on their date.
   Drop one if it's cancelled.

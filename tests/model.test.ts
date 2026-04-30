@@ -12,8 +12,10 @@ import {
   addWaiting,
   allMemos,
   appendNote,
+  availableMemos,
   deleteMemo,
   deferredActions,
+  deferredMemos,
   deferredProjects,
   editItem,
   editList,
@@ -24,7 +26,6 @@ import {
   isTerminal,
   liveActions,
   liveWaiting,
-  pinnedMemos,
   resolveRef,
   setStatus,
   type ActionItem,
@@ -170,7 +171,7 @@ describe('addWaiting', () => {
 })
 
 describe('addMemo', () => {
-  it('creates an unpinned memo by default', () => {
+  it('creates an always-available memo by default', () => {
     const { entity, store } = addMemo(EMPTY_STORE, {
       id: 'M1',
       created_at: T0,
@@ -178,23 +179,23 @@ describe('addMemo', () => {
     })
     assert.equal(entity.type, 'memo')
     assert.equal(entity.note, 'Sam is in hospital')
-    assert.equal(entity.pinned, false)
+    assert.equal(entity.start_at, null)
     assert.equal(entity.project, null)
     assert.equal(entity.created_at, T0)
     assert.equal(store.items.length, 1)
   })
 
-  it('creates a pinned project memo', () => {
+  it('creates a future-start project memo', () => {
     let s: Store = EMPTY_STORE
     s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
     const { entity } = addMemo(s, {
       id: 'M1',
-      created_at: T0,
+      created_at: '2026-04-28T10:00:00Z',
       note: 'Keep this in view',
-      pinned: true,
+      start_at: FUTURE,
       project: 'P1',
     })
-    assert.equal(entity.pinned, true)
+    assert.equal(entity.start_at, FUTURE)
     assert.equal(entity.project, 'P1')
   })
 
@@ -300,19 +301,30 @@ describe('editItem', () => {
     assert.throws(() => editItem(seed(), 'A1', {}), NothingToEdit)
   })
 
-  it('updates memo note, pinned flag, and project', () => {
+  it('updates memo note, start_at, and project', () => {
     let s: Store = EMPTY_STORE
     s = addProject(s, { id: 'P1', created_at: T0, title: 'P' }).store
     s = addMemo(s, { id: 'M1', created_at: T0, note: 'old note' }).store
     const { entity } = editItem(s, 'M1', {
       note: 'new note',
-      pinned: true,
+      start_at: FUTURE,
       project: 'P1',
     })
     assert.equal(entity.type, 'memo')
     assert.equal((entity as MemoItem).note, 'new note')
-    assert.equal((entity as MemoItem).pinned, true)
+    assert.equal((entity as MemoItem).start_at, FUTURE)
     assert.equal(entity.project, 'P1')
+  })
+
+  it('clears memo start_at with null', () => {
+    let s = addMemo(EMPTY_STORE, {
+      id: 'M1',
+      created_at: T0,
+      note: 'old note',
+      start_at: FUTURE,
+    }).store
+    const { entity } = editItem(s, 'M1', { start_at: null })
+    assert.equal((entity as MemoItem).start_at, null)
   })
 
   it('rejects empty memo note', () => {
@@ -325,7 +337,6 @@ describe('editItem', () => {
     let s = addMemo(EMPTY_STORE, { id: 'M1', created_at: T0, note: 'x' }).store
     assert.throws(() => editItem(s, 'M1', { title: 'nope' }), InvalidArgument)
     assert.throws(() => editItem(s, 'M1', { due: '2026-05-01' }), InvalidArgument)
-    assert.throws(() => editItem(s, 'M1', { start_at: FUTURE }), InvalidArgument)
     assert.throws(() => editItem(s, 'M1', { date: '2026-05-01' }), InvalidArgument)
   })
 })
@@ -928,15 +939,27 @@ describe('memo selectors', () => {
   it('allMemos returns memos only', () => {
     let s = seed()
     s = addMemo(s, { id: 'M1', created_at: T0, note: 'first' }).store
-    s = addMemo(s, { id: 'M2', created_at: T0, note: 'second', pinned: true }).store
+    s = addMemo(s, { id: 'M2', created_at: T0, note: 'second', start_at: FUTURE }).store
     assert.deepEqual(allMemos(s).map((m) => m.id), ['M1', 'M2'])
   })
 
-  it('pinnedMemos returns pinned memos only', () => {
+  it('availableMemos returns memos with no start_at, past start_at, and today start_at', () => {
     let s: Store = EMPTY_STORE
-    s = addMemo(s, { id: 'M1', created_at: T0, note: 'first' }).store
-    s = addMemo(s, { id: 'M2', created_at: T0, note: 'second', pinned: true }).store
-    assert.deepEqual(pinnedMemos(s).map((m) => m.id), ['M2'])
+    s = addMemo(s, { id: 'M1', created_at: T0, note: 'always on' }).store
+    s = addMemo(s, { id: 'M2', created_at: T0, note: 'today', start_at: TODAY }).store
+    s = addMemo(s, { id: 'M3', created_at: T0, note: 'past', start_at: PAST }).store
+    s = addMemo(s, { id: 'M4', created_at: T0, note: 'future', start_at: FUTURE }).store
+
+    assert.deepEqual(availableMemos(s, TODAY).map((m) => m.id), ['M1', 'M2', 'M3'])
+  })
+
+  it('deferredMemos returns only memos whose start_at is after today', () => {
+    let s: Store = EMPTY_STORE
+    s = addMemo(s, { id: 'M1', created_at: T0, note: 'always on' }).store
+    s = addMemo(s, { id: 'M2', created_at: T0, note: 'today', start_at: TODAY }).store
+    s = addMemo(s, { id: 'M3', created_at: T0, note: 'future', start_at: FUTURE }).store
+
+    assert.deepEqual(deferredMemos(s, TODAY).map((m) => m.id), ['M3'])
   })
 })
 

@@ -125,9 +125,9 @@ add
 add
   .command('memo <note>')
   .description('Create a memo')
-  .option('--pinned', 'show on the daily dashboard')
+  .option('--start <date>', 'start date (YYYY-MM-DD or natural language)')
   .option('--project <id>', 'parent project id')
-  .action((note: string, opts: { pinned?: boolean; project?: string }) => {
+  .action((note: string, opts: { start?: string; project?: string }) => {
     run(() => addMemoCmd({ note, ...opts }))
   })
 
@@ -138,11 +138,9 @@ program
   .option('--deferred', 'set status=deferred')
   .option('--completed', 'set status=completed')
   .option('--dropped', 'set status=dropped')
-  .option('--start <date>', "start date (action only); '' clears; with future date implies --deferred")
+  .option('--start <date>', "start date; '' clears; action future dates imply --deferred")
   .option('--title <text>', 'new title')
   .option('--note <text>', "note text; '' clears")
-  .option('--pinned', 'pin memo (memos only)')
-  .option('--no-pinned', 'unpin memo (memos only)')
   .option('--note-append <text>', 'append text to the existing note (joins with a blank line)')
   .option('--due <date>', "due date; '' clears (action only)")
   .option('--project <id>', "parent project id; '' detaches (item only)")
@@ -156,7 +154,6 @@ program
         deferred?: boolean
         completed?: boolean
         dropped?: boolean
-        pinned?: boolean
         start?: string
         title?: string
         note?: string

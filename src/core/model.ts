@@ -55,7 +55,7 @@ export type MemoItem = {
   id: string
   type: 'memo'
   note: string
-  pinned: boolean
+  start_at: string | null
   project: string | null
   created_at: string
 }
@@ -155,8 +155,12 @@ export function allMemos(s: Store): MemoItem[] {
   return s.items.filter((i): i is MemoItem => i.type === 'memo')
 }
 
-export function pinnedMemos(s: Store): MemoItem[] {
-  return allMemos(s).filter((memo) => memo.pinned)
+export function availableMemos(s: Store, today: string): MemoItem[] {
+  return allMemos(s).filter((memo) => memo.start_at === null || memo.start_at <= today)
+}
+
+export function deferredMemos(s: Store, today: string): MemoItem[] {
+  return allMemos(s).filter((memo) => memo.start_at !== null && memo.start_at > today)
 }
 
 // Insert ---------------------------------------------------------------
@@ -269,7 +273,7 @@ export type AddMemoInput = {
   id: string
   created_at: string
   note: string
-  pinned?: boolean
+  start_at?: string | null
   project?: string | null
 }
 
@@ -279,7 +283,7 @@ export function addMemo(s: Store, input: AddMemoInput): { store: Store; entity: 
     id: input.id,
     type: 'memo',
     note: requireValidNote(input.note),
-    pinned: input.pinned ?? false,
+    start_at: input.start_at ?? null,
     project: input.project ?? null,
     created_at: input.created_at,
   }
@@ -353,7 +357,6 @@ export function editList(s: Store, id: string, patch: EditListPatch): { store: S
 export type EditItemPatch = {
   title?: string
   note?: string | null
-  pinned?: boolean
   due?: string | null
   project?: string | null
   start_at?: string | null
@@ -366,7 +369,6 @@ export function editItem(s: Store, id: string, patch: EditItemPatch): { store: S
   if (
     patch.title === undefined &&
     patch.note === undefined &&
-    patch.pinned === undefined &&
     patch.due === undefined &&
     patch.project === undefined &&
     patch.start_at === undefined &&
@@ -377,13 +379,12 @@ export function editItem(s: Store, id: string, patch: EditItemPatch): { store: S
   if (item.type === 'memo') {
     if (patch.title !== undefined) throw new InvalidArgument('--title is not allowed on memos')
     if (patch.due !== undefined) throw new InvalidArgument('--due is not allowed on memos')
-    if (patch.start_at !== undefined) throw new InvalidArgument('--start is not allowed on memos')
     if (patch.date !== undefined) throw new InvalidArgument('--date is not allowed on memos')
     if (patch.note !== undefined && patch.note !== null) requireValidNote(patch.note)
     if (patch.project !== undefined) requireListExists(s, patch.project)
     const next: MemoItem = { ...item }
     if (patch.note !== undefined) next.note = requireValidNote(patch.note ?? '')
-    if (patch.pinned !== undefined) next.pinned = patch.pinned
+    if (patch.start_at !== undefined) next.start_at = patch.start_at
     if (patch.project !== undefined) next.project = patch.project
     return { store: replaceItem(s, next), entity: next }
   }

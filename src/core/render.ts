@@ -2,13 +2,13 @@ import {
   activeDeadlines,
   activeProjects,
   allMemos,
+  availableMemos,
   deferredActions,
   deferredProjects,
   findChildren,
   findList,
   liveActions,
   liveWaiting,
-  pinnedMemos,
   projectActiveActions,
   projectDeadlines,
   projectDeferredActions,
@@ -68,6 +68,14 @@ function startDelta(d: number): string {
 
 function dateField(date: string, delta: string): string {
   return `${date} (${delta})`
+}
+
+function memoStartValue(start_at: string, today: string, ctx: Exclude<Ctx, 'show-children'>): string {
+  if (ctx !== 'dashboard' && start_at > today) {
+    const d = dayDelta(start_at, today)
+    return `${start_at} (starts ${start_at}, in ${d} ${dayWord(d)})`
+  }
+  return start_at
 }
 
 function ageField(d: number): string {
@@ -208,13 +216,18 @@ function projectFields(p: ProjectList, s: Store, ctx: Ctx): [string, string][] {
   return f
 }
 
-function memoFields(m: MemoItem, s: Store, ctx: Exclude<Ctx, 'show-children'>): [string, string][] {
+function memoFields(
+  m: MemoItem,
+  s: Store,
+  today: string,
+  ctx: Exclude<Ctx, 'show-children'>,
+): [string, string][] {
   const f: [string, string][] = []
   f.push(['id', m.id])
   f.push(['note', memoNoteValue(m.note)])
+  if (m.start_at !== null) f.push(['start_at', memoStartValue(m.start_at, today, ctx)])
   const ref = projectRef(s, m.project)
   if (ref) f.push(['project', ref])
-  if (ctx !== 'dashboard') f.push(['pinned', m.pinned ? 'true' : 'false'])
   return f
 }
 
@@ -259,7 +272,7 @@ function isTerminal(s: string): boolean {
 function dispatchFields(item: Item, s: Store, today: string, ctx: Ctx): [string, string][] {
   if (item.type === 'action') return actionFields(item, s, today, ctx)
   if (item.type === 'waiting') return waitingFields(item, s, today, ctx)
-  if (item.type === 'memo') return memoFields(item, s, ctx === 'show-children' ? 'review' : ctx)
+  if (item.type === 'memo') return memoFields(item, s, today, ctx === 'show-children' ? 'review' : ctx)
   return deadlineFields(item, s, today, ctx)
 }
 
@@ -277,10 +290,7 @@ function entityBlock(fields: [string, string][]): string {
 }
 
 function orderMemos(memos: MemoItem[]): MemoItem[] {
-  return [...memos].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-    return b.created_at.localeCompare(a.created_at)
-  })
+  return [...memos].sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
 
 function section(heading: string, count: number, blocks: string[]): string {
@@ -292,15 +302,6 @@ function section(heading: string, count: number, blocks: string[]): string {
 
 export function renderDashboard(s: Store, today: string, hints?: string): string {
   const sections: string[] = []
-
-  const memos = orderMemos(pinnedMemos(s))
-  sections.push(
-    section(
-      'KEEP IN MIND',
-      memos.length,
-      memos.map((memo) => itemBlock(memoFields(memo, s, 'dashboard'))),
-    ),
-  )
 
   const aa = liveActions(s, today)
   sections.push(
@@ -338,6 +339,15 @@ export function renderDashboard(s: Store, today: string, hints?: string): string
     ),
   )
 
+  const memos = orderMemos(availableMemos(s, today))
+  sections.push(
+    section(
+      'KEEP IN MIND',
+      memos.length,
+      memos.map((memo) => itemBlock(memoFields(memo, s, today, 'dashboard'))),
+    ),
+  )
+
   if (hints && hints.length > 0) sections.push(`HINTS:\n\n${hints.trimEnd()}`)
 
   return sections.filter((x) => x.length > 0).join('\n\n')
@@ -351,7 +361,7 @@ export function renderReview(s: Store, today: string, hints?: string): string {
     section(
       'MEMOS',
       memos.length,
-      memos.map((memo) => itemBlock(memoFields(memo, s, 'review'))),
+      memos.map((memo) => itemBlock(memoFields(memo, s, today, 'review'))),
     ),
   )
 
@@ -434,7 +444,7 @@ export function renderList(s: Store, today: string, type: ListType): string {
   if (type === 'memos') {
     const memos = orderMemos(allMemos(s))
     if (memos.length === 0) return `${heading} [0]:`
-    const blocks = memos.map((memo) => itemBlock(memoFields(memo, s, 'list')))
+    const blocks = memos.map((memo) => itemBlock(memoFields(memo, s, today, 'list')))
     return section(heading, memos.length, blocks)
   }
   const filtered: Item[] = s.items.filter((i) => {
@@ -449,7 +459,7 @@ export function renderList(s: Store, today: string, type: ListType): string {
 
 export function renderShow(s: Store, today: string, entity: List | Item): string {
   if (entity.type === 'project') return renderShowProject(s, today, entity)
-  if (entity.type === 'memo') return itemBlock(memoFields(entity, s, 'list'))
+  if (entity.type === 'memo') return itemBlock(memoFields(entity, s, today, 'list'))
   return renderShowItem(s, today, entity)
 }
 

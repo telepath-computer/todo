@@ -176,6 +176,40 @@ describe('readStore / writeStore', () => {
     }
   })
 
+  it('normalizes an old memo (pinned, no start_at) to start_at: null and drops pinned on write', () => {
+    const dir = makeTempDataDir()
+    try {
+      mkdirSync(dir, { recursive: true })
+      const raw = JSON.stringify({
+        lists: [],
+        items: [
+          {
+            id: 'M1',
+            type: 'memo',
+            note: 'Old memo',
+            pinned: true,
+            project: null,
+            created_at: nowIso(),
+          },
+        ],
+      })
+      writeFileSync(join(dir, 'store.json'), raw)
+      const back = readStore(dir)
+      assert.equal(back.items.length, 1)
+      const memo = back.items[0]
+      assert.equal(memo.type, 'memo')
+      assert.equal('start_at' in memo, true)
+      assert.equal(memo.start_at, null)
+      assert.equal('pinned' in memo, false)
+
+      writeStore(dir, back)
+      const written = readFileSync(join(dir, 'store.json'), 'utf8')
+      assert.doesNotMatch(written, /"pinned"/)
+    } finally {
+      cleanup(dir)
+    }
+  })
+
   it('normalizes a pre-sub-projects project (no parent) to parent: null on read', () => {
     const dir = makeTempDataDir()
     try {

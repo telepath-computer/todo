@@ -117,7 +117,7 @@ type MemoItem = {
   id: string
   type: 'memo'
   note: string                 // non-empty
-  pinned: boolean
+  start_at: string | null      // YYYY-MM-DD; null = always available
   project: string | null       // optional parent project id; null = standalone
   created_at: string
 }
@@ -142,8 +142,9 @@ type Store = { lists: List[]; items: Item[] }
   (whitespace-only rejected). Memo `note` is non-empty too.
 - `ActionItem.start_at` is only non-null when `status === 'deferred'`. Mutators
   that change status to anything else clear `start_at`.
-- `start_at` must be a strictly-future date (`> today` in host local TZ) at the
-  moment it's written.
+- Action `start_at` must be a strictly-future date (`> today` in host local TZ)
+  at the moment it's written. Memo `start_at` is just a visibility date and may
+  be past, present, future, or null.
 - `ProjectList.parent` is either `null` (root project) or the id of an
   existing root project. Depth strictly 1: a project with `parent !== null`
   cannot be the parent of another. A project with children cannot itself
@@ -171,14 +172,14 @@ with non-zero exit.
 
 | Command | Returns |
 |---|---|
-| `todo` (bare, no subcommand) | The daily dashboard: pinned memos, live items, and a `HINTS:` section if any trigger fires. |
+| `todo` (bare, no subcommand) | The daily dashboard: live items, available memos, and a `HINTS:` section if any trigger fires. |
 | `todo review` | The weekly sweep: all memos, live and deferred work, active deadlines (including lapsed ones), and actionable hints. |
 | `todo list <type>` | Flat enumeration of every item of that type (any status, including completed/dropped/past-date). `<type>` ∈ `actions`, `projects`, `deadlines`, `waiting`, `memo`. |
 | `todo show <id>` | One entity with its fields. Projects also embed `ACTIVE ACTIONS`, `DEFERRED ACTIONS`, `WAITING`, `DEADLINES` sub-buckets scoped to the project (regardless of the project's own status). Memos render as a single YAML-like block. |
 
 **Dashboard buckets** (compared against host-local `YYYY-MM-DD`):
 
-- **Keep in mind**: `type=memo && pinned=true`.
+- **Keep in mind**: `type=memo && (start_at == null || start_at <= today)`.
 - **Active actions**: `type=action && parent.active && (status=active || (status=deferred && start_at != null && start_at <= today))`.
 - **Waiting**: `type=waiting && status=active && parent.active`.
 - **Deadlines**: `type=deadline && status=active && date >= today && parent.active`.
@@ -186,13 +187,18 @@ with non-zero exit.
 
 Past-due scheduled actions auto-promote into the Active actions bucket;
 the stored status stays `deferred`. Children of a deferred or terminal
-project are hidden from the dashboard. Terminal items, dropped deadlines,
-and past-date deadlines are not on the dashboard — reach them via
-`todo list <type>` (which shows everything regardless of status).
+project are hidden from the dashboard. Memos do **not** cascade with
+project status — a memo on a deferred project still shows up when its own
+`start_at` makes it available. Terminal items, dropped deadlines,
+past-date deadlines, and future-dated memos are not on the dashboard —
+reach them via `todo list <type>` (which shows everything regardless of
+status). Section order is `ACTIVE ACTIONS`, `WAITING`, `DEADLINES`,
+`ACTIVE PROJECTS`, `KEEP IN MIND`, `HINTS`.
 
 `todo review` reuses the same active buckets but also includes:
 
-- **Memos**: all memos, pinned first then newest first.
+- **Memos**: all memos, newest first. Deferred memos (`start_at > today`)
+  include a start hint.
 - **Deferred actions**: deferred actions still hidden from the dashboard.
 - **Deadlines**: all active deadlines, including lapsed ones.
 - **Deferred projects**: deferred projects still hidden from the dashboard.
@@ -237,8 +243,8 @@ emitted (no `<none>` placeholders for null).
 ```
 - id: <id>
   note: "<text>"      # or a `|` block scalar when multi-line
+  start_at: <date>    # when set; deferred memo views append `(starts <date>, in N days)`
   project: <Title> [<id>]   # if attached
-  pinned: true|false        # omitted on dashboard, because KEEP IN MIND implies pinned
 ```
 
 `todo show <id>` emits a header line `<TYPE>: "<title>" [<id>]` followed
@@ -263,7 +269,7 @@ todo add action   "<text>" (--active | --deferred | --start <date>)
                              [--project <id>] [--due <date>] [--note <text>]
 todo add waiting  "<text>" [--project <id>] [--note <text>]
 todo add deadline "<text>" --date <date> [--project <id>] [--note <text>]
-todo add memo     "<text>" [--pinned] [--project <id>]
+todo add memo     "<text>" [--start <date>] [--project <id>]
 ```
 
 - `add project` creates a `ProjectList` at `status=active`.
@@ -271,14 +277,15 @@ todo add memo     "<text>" [--pinned] [--project <id>]
   <date>`. `--start <date>` alone implies `--deferred`. `--active` and
   `--deferred` are mutually exclusive; `--active --start ...` is rejected.
 - `--due`, `--start`, and `--date` accept `YYYY-MM-DD` or natural language
-  (`tomorrow`, `next friday`). `--start` and `--date` must resolve to a
-  strictly-future date; `--start ""` is rejected on `add` (use `edit` to
-  clear later).
+  (`tomorrow`, `next friday`). Action `--start` and deadline `--date` must
+  resolve to a strictly-future date; memo `--start` may be any parsed date.
+  `--start ""` is rejected on `add` (use `edit` to clear later).
 - `add waiting` creates a `WaitingItem` at `status=active`. No `--due`, no `--start`.
 - `add deadline` creates a `DeadlineItem` at `status=active`. `--date` is
   required and must be a future date (today and past dates rejected).
 - `add memo` creates a `MemoItem`. The positional text becomes `note`.
-  `--pinned` defaults to false.
+  `--start <date>` sets `start_at`; future-dated memos stay off the
+  dashboard until that day.
 - `--project <id>` must reference an existing project.
 
 ### Edit (polymorphic on id)
@@ -289,7 +296,7 @@ todo add memo     "<text>" [--pinned] [--project <id>]
 ```
 todo edit <id> [--active | --deferred | --completed | --dropped]
               [--start <date>]
-              [--title ...] [--note ...] [--pinned | --no-pinned] [--note-append ...]
+              [--title ...] [--note ...] [--note-append ...]
               [--due ...] [--project ...] [--parent ...] [--date ...]
 ```
 
@@ -316,17 +323,19 @@ Field semantics:
 - `--start <future>` on an action with no explicit status flag implicitly
   transitions `status` to `deferred`. On a terminal action it also clears
   `closed_at` (the schedule overrides the closed state).
-- `--start ""` clears `start_at` without changing status.
+- `--start ""` clears `start_at` without changing status on actions, and
+  clears the memo date on memos.
 - Empty patch (no flags) → error: `nothing to edit`.
 
 Memo-specific rules:
 
-- Memos accept `--note`, `--pinned` / `--no-pinned`, and `--project`.
+- Memos accept `--note`, `--start`, and `--project`.
 - `--note ""` is rejected (`note is required and cannot be empty`).
+- `--start <date>` uses the same date parser as other date flags.
 - `--project ""` detaches the memo from its project.
-- Other entity types reject `--note` and `--pinned` / `--no-pinned`.
-- Memos reject `--title`, lifecycle flags, `--start`, `--due`, `--date`,
-  `--parent`, and `--note-append`.
+- Other entity types reject `--note`.
+- Memos reject `--title`, lifecycle flags, `--due`, `--date`, `--parent`,
+  and `--note-append`.
 
 Status semantics:
 

@@ -25,21 +25,22 @@ Five things go in your todo, in GTD shorthand:
   "complete" it — a deadline is a fact about time.
 - **Memos** — free-standing notes and facts worth keeping around:
   "Sam is in hospital", "ask about budget cap", "printer model is HP 4101".
-  Pin the ones you want on every daily dashboard; the full set resurfaces on
-  `todo review`.
+  Give them an optional start date when they should stay off the daily
+  dashboard until later; the full set resurfaces on `todo review`.
 
 Tasks (actions, projects) finish one of two ways: **completed** (done) or
 **dropped** (not happening). For projects and actions you can flip them
 between active and deferred too. Deadlines only `drop` (and `activate`
 un-drops); the date passing is what retires them.
 
-The dashboard (`todo` with no subcommand) shows what's *live*: pinned
-memos under `KEEP IN MIND`, active actions, waiting items, upcoming
-deadlines, active projects — plus a `HINTS:` section flagging stuff the
-dashboard would otherwise hide (recent lapsed deadlines, stalled
-projects, stale waiting, deferred queue size). Terminal items, dropped
-deadlines, past-date deadlines, and unpinned memos stay out of the way;
-reach them with `todo list <type>` or `todo review`.
+The dashboard (`todo` with no subcommand) shows what's *live*: active
+actions, waiting items, upcoming deadlines, active projects, and
+available memos under `KEEP IN MIND` at the bottom — plus a `HINTS:`
+section flagging stuff the dashboard would otherwise hide (recent
+lapsed deadlines, stalled projects, stale waiting, deferred queue
+size). Terminal items, dropped deadlines, past-date deadlines, and
+future-dated memos stay out of the way; reach them with
+`todo list <type>` or `todo review`.
 
 ## Install
 
@@ -85,14 +86,12 @@ $ todo add waiting "Cover art from designer" --project Vh8XLm2k
 
 $ todo add deadline "Q3 launch" --date "next quarter end" --project Vh8XLm2k
 
-$ todo add memo "Sam is in hospital" --pinned
+$ todo add memo "Vacation starts Monday" --start "next monday"
+# hidden from the daily dashboard until that date; still visible in `todo review`
+
+$ todo add memo "Sam is in hospital"
 
 $ todo
-KEEP IN MIND [1]:
-
-- id: a1b2C3d4
-  note: "Sam is in hospital"
-
 ACTIVE ACTIONS [1]:
 
 - id: K3jLm9pQ
@@ -110,12 +109,19 @@ WAITING [1]:
 DEADLINES [1]:
 ... etc.
 
+ACTIVE PROJECTS [1]:
+... etc.
+
+KEEP IN MIND [1]:
+
+- id: a1b2C3d4
+  note: "Sam is in hospital"
+
 $ todo review
 MEMOS [1]:
 
 - id: a1b2C3d4
   note: "Sam is in hospital"
-  pinned: true
 
 $ todo complete K3jLm9pQ          # done
 $ todo activate K3jLm9pQ          # changed your mind: bring it back live
