@@ -190,11 +190,12 @@ describe('memo CRUD', () => {
     assert.match(r.stderr, /note is required and cannot be empty/i)
   })
 
-  it('edit rejects memo-only flags on non-memo ids', () => {
+  it('edit allows --note on non-memo entities (note is a universal field)', () => {
     const action = addAction('next', { active: true })
-    let r = cli('edit', action.id, '--note', 'replacement')
-    assert.equal(r.code, 1)
-    assert.match(r.stderr, /--note is only allowed on memos/i)
+    const r = cli('edit', action.id, '--note', 'replacement')
+    assert.equal(r.code, 0, r.stderr)
+    const updated = parseJson<{ note: string }>(r.stdout)
+    assert.equal(updated.note, 'replacement')
   })
 
   it('drop hard-deletes memos and returns the last memo JSON', () => {
